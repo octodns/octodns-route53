@@ -49,6 +49,23 @@ Alternatively, you may leave out access_key_id, secret_access_key and session_to
 
 In general the account used will need full permissions on Route53.
 
+#### Processors
+
+```yaml
+processors:
+    awsacm:
+    class: octodns.processor.acme.AwsAcmMangingProcessor
+
+...
+
+zones:
+    something.com.:
+    ...
+    processors:
+    - awsacm
+    ...
+```
+
 ### Support Information
 
 #### Records
