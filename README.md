@@ -1,5 +1,3 @@
-TODO: Review this README and add or modify as necessary.
-
 ## Route53Provider provider for octoDNS
 
 An [octoDNS](https://github.com/octodns/octodns/) provider that targets [Route53](https://aws.amazon.com/route53/).
@@ -38,21 +36,29 @@ octodns_route53==0.0.1
 providers:
   route53:
     class: octodns_route53.Route53Provider
-    # TODO
+    # The AWS access key id
+    access_key_id: env/AWS_ACCESS_KEY_ID
+    # The AWS secret access key
+    secret_access_key: env/AWS_SECRET_ACCESS_KEY
+    # The AWS session token (optional)
+    # Only needed if using temporary security credentials
+    #session_token: env/AWS_SESSION_TOKEN
 ```
+
+Alternatively, you may leave out access_key_id, secret_access_key and session_token.  This will result in boto3 deciding authentication dynamically.
+
+In general the account used will need full permissions on Route53.
 
 ### Support Information
 
 #### Records
 
-TODO: All octoDNS record types are supported.
+A, AAAA, CAA, CNAME, MX, NAPTR, NS, PTR, SPF, SRV, TXT
 
 #### Dynamic
 
-TODO: Route53Provider does not support dynamic records.
+Route53Provider supports dynamic records, CNAME health checks don't support a Host header.
 
 ### Developement
 
 See the [/script/](/script/) directory for some tools to help with the development process. They generally follow the [Script to rule them all](https://github.com/github/scripts-to-rule-them-all) pattern. Most useful is `./script/bootstrap` which will create a venv and install both the runtime and development related requirements. It will also hook up a pre-commit hook that covers most of what's run by CI.
-
-TODO: any provider specific setup, a docker compose to run things locally etc?
