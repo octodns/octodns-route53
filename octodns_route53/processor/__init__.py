@@ -8,20 +8,6 @@ from octodns.processor.base import BaseProcessor
 
 
 class AwsAcmMangingProcessor(BaseProcessor):
-    '''
-    processors:
-        awsacm:
-        class: octodns.processor.acme.AwsAcmMangingProcessor
-
-    ...
-
-    zones:
-        something.com.:
-        ...
-        processors:
-        - awsacm
-        ...
-    '''
 
     log = getLogger('AwsAcmMangingProcessor')
 
