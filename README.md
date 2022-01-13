@@ -78,6 +78,8 @@ Route53Provider supports dynamic records, CNAME health checks don't support a Ho
 
 #### Health Check Options
 
+See https://github.com/octodns/octodns/blob/master/docs/dynamic_records.md#health-checks for information on health checking for dynamic records. Route53Provider supports the following options:
+
 | Key  | Description | Default |
 |--|--|--|
 | measure_latency | Show latency in AWS console | true |
