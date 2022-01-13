@@ -76,6 +76,27 @@ A, AAAA, CAA, CNAME, MX, NAPTR, NS, PTR, SPF, SRV, TXT
 
 Route53Provider supports dynamic records, CNAME health checks don't support a Host header.
 
+#### Health Check Options
+
+| Key  | Description | Default |
+|--|--|--|
+| measure_latency | Show latency in AWS console | true |
+| request_interval | Healthcheck interval [10\|30] seconds | 10 |
+
+```yaml
+---
+  octodns:
+    healthcheck:
+      host: my-host-name
+      path: /dns-health-check
+      port: 443
+      protocol: HTTPS
+    route53:
+      healthcheck:
+        measure_latency: false
+        request_interval: 30
+```
+
 ### Developement
 
 See the [/script/](/script/) directory for some tools to help with the development process. They generally follow the [Script to rule them all](https://github.com/github/scripts-to-rule-them-all) pattern. Most useful is `./script/bootstrap` which will create a venv and install both the runtime and development related requirements. It will also hook up a pre-commit hook that covers most of what's run by CI.
