@@ -32,7 +32,7 @@ setup(
     version=version(),
     tests_require=[
         'mock>=4.0.3',
-        'nose',
-        'nose-no-network',
+        'pytest',
+        'pytest-network',
     ],
 )

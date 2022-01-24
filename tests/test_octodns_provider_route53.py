@@ -55,7 +55,7 @@ class TestOctalReplace(TestCase):
             ('*123', '\\052123'),
             ('**', '\\052\\052'),
         ):
-            self.assertEquals(expected, _octal_replace(s))
+            self.assertEqual(expected, _octal_replace(s))
 
 
 dynamic_rrsets = [{
@@ -446,7 +446,7 @@ class TestRoute53Provider(TestCase):
         # No records, essentially a no-op
         desired = Zone('unit.tests.', [])
         got = provider._process_desired_zone(desired)
-        self.assertEquals(desired.records, got.records)
+        self.assertEqual(desired.records, got.records)
 
         # Record without any geos
         desired = Zone('unit.tests.', [])
@@ -469,8 +469,8 @@ class TestRoute53Provider(TestCase):
         })
         desired.add_record(record)
         got = provider._process_desired_zone(desired)
-        self.assertEquals(desired.records, got.records)
-        self.assertEquals(1, len(list(got.records)[0].dynamic.rules))
+        self.assertEqual(desired.records, got.records)
+        self.assertEqual(1, len(list(got.records)[0].dynamic.rules))
         self.assertFalse('geos' in list(got.records)[0].dynamic.rules[0].data)
 
         # Record where all geos are supported
@@ -502,9 +502,9 @@ class TestRoute53Provider(TestCase):
         })
         desired.add_record(record)
         got = provider._process_desired_zone(desired)
-        self.assertEquals(2, len(list(got.records)[0].dynamic.rules))
-        self.assertEquals(['EU', 'NA-US-OR'],
-                          list(got.records)[0].dynamic.rules[0].data['geos'])
+        self.assertEqual(2, len(list(got.records)[0].dynamic.rules))
+        self.assertEqual(['EU', 'NA-US-OR'],
+                         list(got.records)[0].dynamic.rules[0].data['geos'])
         self.assertFalse('geos' in list(got.records)[0].dynamic.rules[1].data)
 
         # Record with NA-CA-* only rule which is removed
@@ -536,7 +536,7 @@ class TestRoute53Provider(TestCase):
         })
         desired.add_record(record)
         got = provider._process_desired_zone(desired)
-        self.assertEquals(1, len(list(got.records)[0].dynamic.rules))
+        self.assertEqual(1, len(list(got.records)[0].dynamic.rules))
         self.assertFalse('geos' in list(got.records)[0].dynamic.rules[0].data)
 
         # Record with NA-CA-* rule combined with other geos, filtered
@@ -568,9 +568,9 @@ class TestRoute53Provider(TestCase):
         })
         desired.add_record(record)
         got = provider._process_desired_zone(desired)
-        self.assertEquals(2, len(list(got.records)[0].dynamic.rules))
-        self.assertEquals(['EU', 'NA-US-OR'],
-                          list(got.records)[0].dynamic.rules[0].data['geos'])
+        self.assertEqual(2, len(list(got.records)[0].dynamic.rules))
+        self.assertEqual(['EU', 'NA-US-OR'],
+                         list(got.records)[0].dynamic.rules[0].data['geos'])
         self.assertFalse('geos' in list(got.records)[0].dynamic.rules[1].data)
 
     # with fallback boto makes an unstubbed call to the 169. metadata api, this
@@ -775,13 +775,13 @@ class TestRoute53Provider(TestCase):
         provider.populate(got)
         # Make sure we got what we expected
         changes = self.expected.changes(got, GeoProvider())
-        self.assertEquals(0, len(changes))
+        self.assertEqual(0, len(changes))
         stubber.assert_no_pending_responses()
 
         # Populate a zone that doesn't exist
         nonexistent = Zone('does.not.exist.', [])
         provider.populate(nonexistent)
-        self.assertEquals(set(), nonexistent.records)
+        self.assertEqual(set(), nonexistent.records)
 
     def test_sync(self):
         provider, stubber = self._get_stubbed_provider()
@@ -808,7 +808,7 @@ class TestRoute53Provider(TestCase):
                              {'HostedZoneId': 'z42'})
 
         plan = provider.plan(self.expected)
-        self.assertEquals(9, len(plan.changes))
+        self.assertEqual(9, len(plan.changes))
         self.assertTrue(plan.exists)
         for change in plan.changes:
             self.assertIsInstance(change, Create)
@@ -828,7 +828,7 @@ class TestRoute53Provider(TestCase):
                                  'SubmittedAt': '2017-01-29T01:02:03Z',
                              }}, {'HostedZoneId': 'z42', 'ChangeBatch': ANY})
 
-        self.assertEquals(9, provider.apply(plan))
+        self.assertEqual(9, provider.apply(plan))
         stubber.assert_no_pending_responses()
 
         # Delete by monkey patching in a populate that includes an extra record
@@ -861,9 +861,9 @@ class TestRoute53Provider(TestCase):
                                  'SubmittedAt': '2017-01-29T01:02:03Z',
                              }}, change_resource_record_sets_params)
         plan = provider.plan(self.expected)
-        self.assertEquals(1, len(plan.changes))
+        self.assertEqual(1, len(plan.changes))
         self.assertIsInstance(plan.changes[0], Delete)
-        self.assertEquals(1, provider.apply(plan))
+        self.assertEqual(1, provider.apply(plan))
         stubber.assert_no_pending_responses()
 
         # Update by monkey patching in a populate that modifies the A record
@@ -957,9 +957,9 @@ class TestRoute53Provider(TestCase):
                                  'SubmittedAt': '2017-01-29T01:02:03Z',
                              }}, change_resource_record_sets_params)
         plan = provider.plan(self.expected)
-        self.assertEquals(1, len(plan.changes))
+        self.assertEqual(1, len(plan.changes))
         self.assertIsInstance(plan.changes[0], Update)
-        self.assertEquals(1, provider.apply(plan))
+        self.assertEqual(1, provider.apply(plan))
         stubber.assert_no_pending_responses()
 
         # Update converting to non-geo by monkey patching in a populate that
@@ -1021,9 +1021,9 @@ class TestRoute53Provider(TestCase):
                                  'SubmittedAt': '2017-01-29T01:02:03Z',
                              }}, change_resource_record_sets_params)
         plan = provider.plan(self.expected)
-        self.assertEquals(1, len(plan.changes))
+        self.assertEqual(1, len(plan.changes))
         self.assertIsInstance(plan.changes[0], Update)
-        self.assertEquals(1, provider.apply(plan))
+        self.assertEqual(1, provider.apply(plan))
         stubber.assert_no_pending_responses()
 
     def test_sync_create(self):
@@ -1041,7 +1041,7 @@ class TestRoute53Provider(TestCase):
                              {})
 
         plan = provider.plan(self.expected)
-        self.assertEquals(9, len(plan.changes))
+        self.assertEqual(9, len(plan.changes))
         self.assertFalse(plan.exists)
         for change in plan.changes:
             self.assertIsInstance(change, Create)
@@ -1108,7 +1108,7 @@ class TestRoute53Provider(TestCase):
                                  'SubmittedAt': '2017-01-29T01:02:03Z',
                              }}, {'HostedZoneId': 'z42', 'ChangeBatch': ANY})
 
-        self.assertEquals(9, provider.apply(plan))
+        self.assertEqual(9, provider.apply(plan))
         stubber.assert_no_pending_responses()
 
     def test_sync_create_with_delegation_set(self):
@@ -1126,7 +1126,7 @@ class TestRoute53Provider(TestCase):
                              {})
 
         plan = provider.plan(self.expected)
-        self.assertEquals(9, len(plan.changes))
+        self.assertEqual(9, len(plan.changes))
         self.assertFalse(plan.exists)
         for change in plan.changes:
             self.assertIsInstance(change, Create)
@@ -1194,7 +1194,7 @@ class TestRoute53Provider(TestCase):
                                  'SubmittedAt': '2017-01-29T01:02:03Z',
                              }}, {'HostedZoneId': 'z42', 'ChangeBatch': ANY})
 
-        self.assertEquals(9, provider.apply(plan))
+        self.assertEqual(9, provider.apply(plan))
         stubber.assert_no_pending_responses()
 
     def test_health_checks_pagination(self):
@@ -1271,7 +1271,7 @@ class TestRoute53Provider(TestCase):
                              }, {'Marker': 'moar'})
 
         health_checks = provider.health_checks
-        self.assertEquals({
+        self.assertEqual({
             '42': health_checks_p1[0],
             '44': health_checks_p2[0],
         }, health_checks)
@@ -1288,7 +1288,7 @@ class TestRoute53Provider(TestCase):
         })
         value = record.geo['AF'].values[0]
         id = provider.get_health_check_id(record, value, 'obey', True)
-        self.assertEquals('42', id)
+        self.assertEqual('42', id)
 
     def test_health_check_status_support(self):
         provider, stubber = self._get_stubbed_provider()
@@ -1373,15 +1373,15 @@ class TestRoute53Provider(TestCase):
                 }]
             }
         })
-        self.assertEquals('42',
-                          provider.get_health_check_id(record, '1.1.1.1',
-                                                       'obey', False))
-        self.assertEquals(None,
-                          provider.get_health_check_id(record, '2.2.2.2',
-                                                       'up', False))
-        self.assertEquals('44',
-                          provider.get_health_check_id(record, '3.3.3.3',
-                                                       'down', False))
+        self.assertEqual('42',
+                         provider.get_health_check_id(record, '1.1.1.1',
+                                                      'obey', False))
+        self.assertEqual(None,
+                         provider.get_health_check_id(record, '2.2.2.2',
+                                                      'up', False))
+        self.assertEqual('44',
+                         provider.get_health_check_id(record, '3.3.3.3',
+                                                      'down', False))
 
         # If we're not allowed to create we won't find a health check for
         # 1.1.1.1 with status up or down
@@ -1516,12 +1516,12 @@ class TestRoute53Provider(TestCase):
 
         # when allowed to create we do
         id = provider.get_health_check_id(record, value, 'obey', True)
-        self.assertEquals('42', id)
+        self.assertEqual('42', id)
 
         # when allowed to create and when host is None
         record._octodns['healthcheck']['host'] = None
         id = provider.get_health_check_id(record, value, 'obey', True)
-        self.assertEquals('43', id)
+        self.assertEqual('43', id)
         stubber.assert_no_pending_responses()
 
         # A CNAME style healthcheck, without a value
@@ -1554,7 +1554,7 @@ class TestRoute53Provider(TestCase):
 
         id = provider.get_health_check_id(record, 'target-1.unit.tests.',
                                           'obey', True)
-        self.assertEquals('42', id)
+        self.assertEqual('42', id)
         stubber.assert_no_pending_responses()
 
         # TCP health check
@@ -1586,7 +1586,7 @@ class TestRoute53Provider(TestCase):
         record._octodns['healthcheck']['protocol'] = 'TCP'
         id = provider.get_health_check_id(record, 'target-1.unit.tests.',
                                           'obey', True)
-        self.assertEquals('42', id)
+        self.assertEqual('42', id)
         stubber.assert_no_pending_responses()
 
     def test_health_check_provider_options(self):
@@ -1609,7 +1609,7 @@ class TestRoute53Provider(TestCase):
         latency = provider._healthcheck_measure_latency(record)
         interval = provider._healthcheck_request_interval(record)
         self.assertTrue(latency)
-        self.assertEquals(10, interval)
+        self.assertEqual(10, interval)
 
         record_default = Record.new(self.expected, 'a', {
             'ttl': 61,
@@ -1619,7 +1619,7 @@ class TestRoute53Provider(TestCase):
         latency = provider._healthcheck_measure_latency(record_default)
         interval = provider._healthcheck_request_interval(record_default)
         self.assertTrue(latency)
-        self.assertEquals(10, interval)
+        self.assertEqual(10, interval)
 
         record = Record.new(self.expected, 'a', {
             'ttl': 61,
@@ -1639,7 +1639,7 @@ class TestRoute53Provider(TestCase):
         latency = provider._healthcheck_measure_latency(record)
         interval = provider._healthcheck_request_interval(record)
         self.assertFalse(latency)
-        self.assertEquals(30, interval)
+        self.assertEqual(30, interval)
 
         record_invalid = Record.new(self.expected, 'a', {
             'ttl': 61,
@@ -1721,7 +1721,7 @@ class TestRoute53Provider(TestCase):
         ml = provider.health_checks[id]['HealthCheckConfig']['MeasureLatency']
         ri = provider.health_checks[id]['HealthCheckConfig']['RequestInterval']
         self.assertFalse(ml)
-        self.assertEquals(30, ri)
+        self.assertEqual(30, ri)
 
     def test_health_check_gc(self):
         provider, stubber = self._get_stubbed_provider()
@@ -1902,7 +1902,7 @@ class TestRoute53Provider(TestCase):
         # empty is empty
         desired = Zone('unit.tests.', [])
         extra = provider._extra_changes(desired=desired, changes=[])
-        self.assertEquals([], extra)
+        self.assertEqual([], extra)
         stubber.assert_no_pending_responses()
 
         # single record w/o geo is empty
@@ -1914,13 +1914,13 @@ class TestRoute53Provider(TestCase):
         })
         desired.add_record(record)
         extra = provider._extra_changes(desired=desired, changes=[])
-        self.assertEquals([], extra)
+        self.assertEqual([], extra)
         stubber.assert_no_pending_responses()
 
         # short-circuit for unknown zone
         other = Zone('other.tests.', [])
         extra = provider._extra_changes(desired=other, changes=[])
-        self.assertEquals([], extra)
+        self.assertEqual([], extra)
         stubber.assert_no_pending_responses()
 
     def test_no_changes_with_get_zones_by_name(self):
@@ -1974,7 +1974,7 @@ class TestRoute53Provider(TestCase):
         # empty is empty
         desired = Zone('unit.tests.', [])
         extra = provider._extra_changes(desired=desired, changes=[])
-        self.assertEquals([], extra)
+        self.assertEqual([], extra)
         stubber.assert_no_pending_responses()
 
         stubber.add_response(
@@ -1986,7 +1986,7 @@ class TestRoute53Provider(TestCase):
         # empty is empty
         desired = Zone('unit2.tests.', [])
         extra = provider._extra_changes(desired=desired, changes=[])
-        self.assertEquals([], extra)
+        self.assertEqual([], extra)
         stubber.assert_no_pending_responses()
 
     def test_zone_not_found_get_zones_by_name(self):
@@ -2023,7 +2023,7 @@ class TestRoute53Provider(TestCase):
         # empty is empty
         desired = Zone('unit.tests.', [])
         extra = provider._extra_changes(desired=desired, changes=[])
-        self.assertEquals([], extra)
+        self.assertEqual([], extra)
         stubber.assert_no_pending_responses()
 
     def test_plan_apply_with_get_zones_by_name_zone_not_exists(self):
@@ -2051,7 +2051,7 @@ class TestRoute53Provider(TestCase):
         )
 
         plan = provider.plan(self.expected)
-        self.assertEquals(9, len(plan.changes))
+        self.assertEqual(9, len(plan.changes))
 
         create_hosted_zone_resp = {
             'HostedZone': {
@@ -2114,7 +2114,7 @@ class TestRoute53Provider(TestCase):
                                  'SubmittedAt': '2017-01-29T01:02:03Z',
                              }}, {'HostedZoneId': 'z42', 'ChangeBatch': ANY})
 
-        self.assertEquals(9, provider.apply(plan))
+        self.assertEqual(9, provider.apply(plan))
         stubber.assert_no_pending_responses()
 
     def test_plan_apply_with_get_zones_by_name_zone_exists(self):
@@ -2166,7 +2166,7 @@ class TestRoute53Provider(TestCase):
                              {'HostedZoneId': 'z42'})
 
         plan = provider.plan(self.expected)
-        self.assertEquals(10, len(plan.changes))
+        self.assertEqual(10, len(plan.changes))
 
         stubber.add_response('list_health_checks',
                              {
@@ -2183,7 +2183,7 @@ class TestRoute53Provider(TestCase):
                                  'SubmittedAt': '2017-01-29T01:02:03Z',
                              }}, {'HostedZoneId': 'z42', 'ChangeBatch': ANY})
 
-        self.assertEquals(10, provider.apply(plan))
+        self.assertEqual(10, provider.apply(plan))
         stubber.assert_no_pending_responses()
 
     def test_extra_change_no_health_check(self):
@@ -2231,7 +2231,7 @@ class TestRoute53Provider(TestCase):
                              list_resource_record_sets_resp,
                              {'HostedZoneId': 'z42'})
         extra = provider._extra_changes(desired=desired, changes=[])
-        self.assertEquals(1, len(extra))
+        self.assertEqual(1, len(extra))
         stubber.assert_no_pending_responses()
 
     def test_extra_change_has_wrong_health_check(self):
@@ -2303,12 +2303,12 @@ class TestRoute53Provider(TestCase):
             'Marker': '',
         })
         extra = provider._extra_changes(desired=desired, changes=[])
-        self.assertEquals(1, len(extra))
+        self.assertEqual(1, len(extra))
         stubber.assert_no_pending_responses()
 
         for change in (Create(record), Update(record, record), Delete(record)):
             extra = provider._extra_changes(desired=desired, changes=[change])
-            self.assertEquals(0, len(extra))
+            self.assertEqual(0, len(extra))
             stubber.assert_no_pending_responses()
 
     def test_extra_change_has_health_check(self):
@@ -2411,7 +2411,7 @@ class TestRoute53Provider(TestCase):
             'Marker': '',
         })
         extra = provider._extra_changes(desired=desired, changes=[])
-        self.assertEquals(0, len(extra))
+        self.assertEqual(0, len(extra))
         stubber.assert_no_pending_responses()
 
         # change b/c of healthcheck path
@@ -2419,7 +2419,7 @@ class TestRoute53Provider(TestCase):
             'path': '/_ready'
         }
         extra = provider._extra_changes(desired=desired, changes=[])
-        self.assertEquals(1, len(extra))
+        self.assertEqual(1, len(extra))
         stubber.assert_no_pending_responses()
 
     def test_extra_change_dynamic_has_health_check(self):
@@ -2563,7 +2563,7 @@ class TestRoute53Provider(TestCase):
             'Marker': '',
         })
         extra = provider._extra_changes(desired=desired, changes=[])
-        self.assertEquals(0, len(extra))
+        self.assertEqual(0, len(extra))
         stubber.assert_no_pending_responses()
 
         # change b/c of healthcheck path
@@ -2571,7 +2571,7 @@ class TestRoute53Provider(TestCase):
             'path': '/_ready'
         }
         extra = provider._extra_changes(desired=desired, changes=[])
-        self.assertEquals(1, len(extra))
+        self.assertEqual(1, len(extra))
         stubber.assert_no_pending_responses()
 
         # change b/c of healthcheck host
@@ -2579,7 +2579,7 @@ class TestRoute53Provider(TestCase):
             'host': 'foo.bar.io'
         }
         extra = provider._extra_changes(desired=desired, changes=[])
-        self.assertEquals(1, len(extra))
+        self.assertEqual(1, len(extra))
         stubber.assert_no_pending_responses()
 
     def test_extra_change_dyamic_status_up(self):
@@ -2765,7 +2765,7 @@ class TestRoute53Provider(TestCase):
             'Marker': '',
         })
         extra = provider._extra_changes(desired=desired, changes=[])
-        self.assertEquals(0, len(extra))
+        self.assertEqual(0, len(extra))
         stubber.assert_no_pending_responses()
 
         # change b/c of healthcheck path
@@ -2773,7 +2773,7 @@ class TestRoute53Provider(TestCase):
             'path': '/_ready'
         }
         extra = provider._extra_changes(desired=desired, changes=[])
-        self.assertEquals(1, len(extra))
+        self.assertEqual(1, len(extra))
         stubber.assert_no_pending_responses()
 
         # no change b/c healthcheck host ignored for dynamic cname
@@ -2781,7 +2781,7 @@ class TestRoute53Provider(TestCase):
             'host': 'foo.bar.io'
         }
         extra = provider._extra_changes(desired=desired, changes=[])
-        self.assertEquals(0, len(extra))
+        self.assertEqual(0, len(extra))
         stubber.assert_no_pending_responses()
 
     def _get_test_plan(self, max_changes):
@@ -2867,7 +2867,7 @@ class TestRoute53Provider(TestCase):
         # 18 RRs with max of 17 should only get applied in two calls
         provider, plan = self._get_test_plan(18)
         provider.apply(plan)
-        self.assertEquals(2, really_apply_mock.call_count)
+        self.assertEqual(2, really_apply_mock.call_count)
 
     @patch('octodns_route53.Route53Provider._load_records')
     @patch('octodns_route53.Route53Provider._really_apply')
@@ -2876,7 +2876,7 @@ class TestRoute53Provider(TestCase):
         # with a max of seven modifications, three calls
         provider, plan = self._get_test_plan(7)
         provider.apply(plan)
-        self.assertEquals(3, really_apply_mock.call_count)
+        self.assertEqual(3, really_apply_mock.call_count)
 
     @patch('octodns_route53.Route53Provider._load_records')
     @patch('octodns_route53.Route53Provider._really_apply')
@@ -2885,7 +2885,7 @@ class TestRoute53Provider(TestCase):
         # with a max of 11 modifications, two calls
         provider, plan = self._get_test_plan(11)
         provider.apply(plan)
-        self.assertEquals(2, really_apply_mock.call_count)
+        self.assertEqual(2, really_apply_mock.call_count)
 
     @patch('octodns_route53.Route53Provider._load_records')
     @patch('octodns_route53.Route53Provider._really_apply')
@@ -2900,7 +2900,7 @@ class TestRoute53Provider(TestCase):
     def test_semicolon_fixup(self):
         provider = Route53Provider('test', 'abc', '123')
 
-        self.assertEquals({
+        self.assertEqual({
             'type': 'TXT',
             'ttl': 30,
             'values': [
@@ -2921,7 +2921,7 @@ class TestRoute53Provider(TestCase):
         provider = Route53Provider('test', 'abc', '123',
                                    client_max_attempts=42)
         # NOTE: this will break if boto ever changes the impl details...
-        self.assertEquals({
+        self.assertEqual({
             'mode': 'legacy',
             'total_max_attempts': 43,
         }, provider._conn._client_config.retries)
@@ -2931,7 +2931,7 @@ class TestRoute53Provider(TestCase):
         provider._health_checks = dynamic_health_checks
 
         data = provider._data_for_dynamic('', 'A', dynamic_rrsets)
-        self.assertEquals(dynamic_record_data, data)
+        self.assertEqual(dynamic_record_data, data)
 
     @patch('octodns_route53.Route53Provider._get_zone_id')
     @patch('octodns_route53.Route53Provider._load_records')
@@ -2945,17 +2945,17 @@ class TestRoute53Provider(TestCase):
         got = Zone('unit.tests.', [])
         provider.populate(got)
 
-        self.assertEquals(1, len(got.records))
+        self.assertEqual(1, len(got.records))
         record = list(got.records)[0]
-        self.assertEquals('', record.name)
-        self.assertEquals('A', record._type)
-        self.assertEquals([
+        self.assertEqual('', record.name)
+        self.assertEqual('A', record._type)
+        self.assertEqual([
             '1.1.2.1',
             '1.1.2.2',
         ], record.values)
         self.assertTrue(record.dynamic)
 
-        self.assertEquals({
+        self.assertEqual({
             'ap-southeast-1': {
                 'fallback': 'us-east-1',
                 'values': [{
@@ -2982,7 +2982,7 @@ class TestRoute53Provider(TestCase):
             }
         }, {k: v.data for k, v in record.dynamic.pools.items()})
 
-        self.assertEquals([
+        self.assertEqual([
             {
                 'geos': ['AS-CN', 'AS-JP'],
                 'pool': 'ap-southeast-1',
@@ -3018,7 +3018,7 @@ class TestRoute53Records(TestCase):
         for value in (None, '', 'foo', 'bar', '1.2.3.4'):
             converted = route53_record._value_convert_value(value,
                                                             self.record_a)
-            self.assertEquals(value, converted)
+            self.assertEqual(value, converted)
 
         record_txt = Record.new(self.existing, 'txt', {
             'ttl': 98,
@@ -3029,56 +3029,56 @@ class TestRoute53Records(TestCase):
         # We don't really have to test the details fo chunked_value as that's
         # tested elsewhere, we just need to make sure that it's plumbed up and
         # working
-        self.assertEquals('"Not Important"', route53_record
-                          ._value_convert_quoted(record_txt.values[0],
-                                                 record_txt))
+        self.assertEqual('"Not Important"', route53_record
+                         ._value_convert_quoted(record_txt.values[0],
+                                                record_txt))
 
     def test_route53_record(self):
         a = _Route53Record(None, self.record_a, False)
-        self.assertEquals(a, a)
+        self.assertEqual(a, a)
         b = _Route53Record(None, Record.new(self.existing, '',
                                             {'ttl': 32, 'type': 'A',
                                              'values': ['8.8.8.8',
                                                         '1.1.1.1']}),
                            False)
-        self.assertEquals(b, b)
+        self.assertEqual(b, b)
         c = _Route53Record(None, Record.new(self.existing, 'other',
                                             {'ttl': 99, 'type': 'A',
                                              'values': ['9.9.9.9']}),
                            False)
-        self.assertEquals(c, c)
+        self.assertEqual(c, c)
         d = _Route53Record(None, Record.new(self.existing, '',
                                             {'ttl': 42, 'type': 'MX',
                                              'value': {
                                                  'preference': 10,
                                                  'exchange': 'foo.bar.'}}),
                            False)
-        self.assertEquals(d, d)
+        self.assertEqual(d, d)
 
         # Same fqdn & type is same record
-        self.assertEquals(a, b)
+        self.assertEqual(a, b)
         # Same name & different type is not the same
-        self.assertNotEquals(a, d)
+        self.assertNotEqual(a, d)
         # Different name & same type is not the same
-        self.assertNotEquals(a, c)
+        self.assertNotEqual(a, c)
 
         # Same everything, different class is not the same
         e = _Route53GeoDefault(None, self.record_a, False)
-        self.assertNotEquals(a, e)
+        self.assertNotEqual(a, e)
 
         provider = DummyProvider()
         f = _Route53GeoRecord(provider, self.record_a, 'NA-US',
                               self.record_a.geo['NA-US'], False)
-        self.assertEquals(f, f)
+        self.assertEqual(f, f)
         g = _Route53GeoRecord(provider, self.record_a, 'OC',
                               self.record_a.geo['OC'], False)
-        self.assertEquals(g, g)
+        self.assertEqual(g, g)
 
         # Geo and non-geo are not the same, using Geo as primary to get it's
         # __cmp__
-        self.assertNotEquals(f, a)
+        self.assertNotEqual(f, a)
         # Same everything, different geo's is not the same
-        self.assertNotEquals(f, g)
+        self.assertNotEqual(f, g)
 
         # Make sure it doesn't blow up
         a.__repr__()
@@ -3175,13 +3175,13 @@ class TestRoute53Records(TestCase):
         # HealthCheckId and one that was created wouldn't since DummyProvider
         # stubs out the lookup for them
         mod = geo.mod('DELETE', candidates)
-        self.assertEquals('x12346z', mod['ResourceRecordSet']['HealthCheckId'])
+        self.assertEqual('x12346z', mod['ResourceRecordSet']['HealthCheckId'])
 
         # If we don't provide the candidate rrsets we get back exactly what we
         # put in minus the healthcheck
         del rrset['HealthCheckId']
         mod = geo.mod('DELETE', [])
-        self.assertEquals(rrset, mod['ResourceRecordSet'])
+        self.assertEqual(rrset, mod['ResourceRecordSet'])
 
     def test_geo_delete(self):
         provider = DummyProvider()
@@ -3224,13 +3224,13 @@ class TestRoute53Records(TestCase):
         # HealthCheckId and one that was created wouldn't since DummyProvider
         # stubs out the lookup for them
         mod = geo.mod('DELETE', candidates)
-        self.assertEquals('x12346z', mod['ResourceRecordSet']['HealthCheckId'])
+        self.assertEqual('x12346z', mod['ResourceRecordSet']['HealthCheckId'])
 
         # If we don't provide the candidate rrsets we get back exactly what we
         # put in minus the healthcheck
         del rrset['HealthCheckId']
         mod = geo.mod('DELETE', [])
-        self.assertEquals(rrset, mod['ResourceRecordSet'])
+        self.assertEqual(rrset, mod['ResourceRecordSet'])
 
     def test_new_dynamic(self):
         provider = Route53Provider('test', 'abc', '123')
@@ -3251,14 +3251,14 @@ class TestRoute53Records(TestCase):
         # Convert a record into _Route53Records
         route53_records = _Route53Record.new(provider, record, 'z45',
                                              creating=True)
-        self.assertEquals(18, len(route53_records))
+        self.assertEqual(18, len(route53_records))
 
         expected_mods = [r.mod('CREATE', []) for r in route53_records]
         # Sort so that we get a consistent order and don't rely on set ordering
         expected_mods.sort(key=_mod_keyer)
 
         # Convert the route53_records into mods
-        self.assertEquals([{
+        self.assertEqual([{
             'Action': 'CREATE',
             'ResourceRecordSet': {
                 'HealthCheckId': 'hc42',
@@ -3468,7 +3468,7 @@ class TestModKeyer(TestCase):
         # First "column" is the action priority for C/R/U
 
         # Deletes come first
-        self.assertEquals((0, 0, 'something'), _mod_keyer({
+        self.assertEqual((0, 0, 'something'), _mod_keyer({
             'Action': 'DELETE',
             'ResourceRecordSet': {
                 'Name': 'something',
@@ -3476,7 +3476,7 @@ class TestModKeyer(TestCase):
         }))
 
         # Creates come next
-        self.assertEquals((1, 0, 'another'), _mod_keyer({
+        self.assertEqual((1, 0, 'another'), _mod_keyer({
             'Action': 'CREATE',
             'ResourceRecordSet': {
                 'Name': 'another',
@@ -3484,7 +3484,7 @@ class TestModKeyer(TestCase):
         }))
 
         # Upserts are the same as creates
-        self.assertEquals((1, 0, 'last'), _mod_keyer({
+        self.assertEqual((1, 0, 'last'), _mod_keyer({
             'Action': 'UPSERT',
             'ResourceRecordSet': {
                 'Name': 'last',
@@ -3494,7 +3494,7 @@ class TestModKeyer(TestCase):
         # Second "column" value records tested above
 
         # AliasTarget primary second (to value)
-        self.assertEquals((0, -1, 'thing'), _mod_keyer({
+        self.assertEqual((0, -1, 'thing'), _mod_keyer({
             'Action': 'DELETE',
             'ResourceRecordSet': {
                 'AliasTarget': 'some-target',
@@ -3503,7 +3503,7 @@ class TestModKeyer(TestCase):
             }
         }))
 
-        self.assertEquals((1, 1, 'thing'), _mod_keyer({
+        self.assertEqual((1, 1, 'thing'), _mod_keyer({
             'Action': 'UPSERT',
             'ResourceRecordSet': {
                 'AliasTarget': 'some-target',
@@ -3513,7 +3513,7 @@ class TestModKeyer(TestCase):
         }))
 
         # AliasTarget secondary third
-        self.assertEquals((0, -2, 'thing'), _mod_keyer({
+        self.assertEqual((0, -2, 'thing'), _mod_keyer({
             'Action': 'DELETE',
             'ResourceRecordSet': {
                 'AliasTarget': 'some-target',
@@ -3522,7 +3522,7 @@ class TestModKeyer(TestCase):
             }
         }))
 
-        self.assertEquals((1, 2, 'thing'), _mod_keyer({
+        self.assertEqual((1, 2, 'thing'), _mod_keyer({
             'Action': 'UPSERT',
             'ResourceRecordSet': {
                 'AliasTarget': 'some-target',
@@ -3532,7 +3532,7 @@ class TestModKeyer(TestCase):
         }))
 
         # GeoLocation fourth
-        self.assertEquals((0, -3, 'some-id'), _mod_keyer({
+        self.assertEqual((0, -3, 'some-id'), _mod_keyer({
             'Action': 'DELETE',
             'ResourceRecordSet': {
                 'GeoLocation': 'some-target',
@@ -3540,7 +3540,7 @@ class TestModKeyer(TestCase):
             }
         }))
 
-        self.assertEquals((1, 3, 'some-id'), _mod_keyer({
+        self.assertEqual((1, 3, 'some-id'), _mod_keyer({
             'Action': 'UPSERT',
             'ResourceRecordSet': {
                 'GeoLocation': 'some-target',
