@@ -1,4 +1,4 @@
-## v0.0.3 - 2022-01-11 - What we really need
+## v0.0.3 - 2022-01-23 - What we really need
 
 * Fix boto -> boto3 type-o/problem with setup.py
 * Switch to pytest since nose is long :skull:ed
