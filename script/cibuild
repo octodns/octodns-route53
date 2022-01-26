@@ -14,7 +14,7 @@ fi
 
 echo "## environment & versions ######################################################"
 python --version
-python -m pip --version
+pip --version
 
 echo "## clean up ####################################################################"
 find octodns_route53 tests* -name "*.pyc" -exec rm {} \;
