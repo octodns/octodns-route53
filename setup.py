@@ -27,12 +27,15 @@ setup(
     name='octodns-route53',
     packages=find_packages(),
     python_requires='>=3.6',
-    install_requires=('octodns>=0.9.14', 'boto3>=1.20.26'),
+    install_requires=(
+        'boto3>=1.20.26',
+        'octodns>=0.9.14',
+    ),
     url='https://github.com/octodns/octodns-route53',
     version=version(),
-    tests_require=[
+    tests_require=(
         'mock>=4.0.3',
         'pytest',
         'pytest-network',
-    ],
+    ),
 )
