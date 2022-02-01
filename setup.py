@@ -30,6 +30,7 @@ setup(
     install_requires=(
         'boto3>=1.20.26',
         'octodns>=0.9.14',
+        'pycountry-convert>=0.7.2',
     ),
     url='https://github.com/octodns/octodns-route53',
     version=version(),
