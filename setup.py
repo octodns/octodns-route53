@@ -17,26 +17,36 @@ def version():
 
 description, long_description = descriptions()
 
+tests_require = (
+    'pytest',
+    'pytest-network',
+)
+
 setup(
     author='Ross McFarland',
     author_email='rwmcfa1@gmail.com',
     description=description,
+    extras_require={
+        'dev': tests_require + (
+            'build>=0.7.0',
+            'pycodestyle>=2.6.0',
+            'pyflakes>=2.2.0',
+            'readme_renderer[md]>=26.0',
+            'twine>=3.4.2',
+        ),
+    },
+    install_requires=(
+        'boto3>=1.20.26',
+        'octodns>=0.9.14',
+        'pycountry-convert>=0.7.2',
+    ),
     license='MIT',
     long_description=long_description,
     long_description_content_type='text/markdown',
     name='octodns-route53',
     packages=find_packages(),
     python_requires='>=3.6',
-    install_requires=(
-        'boto3>=1.20.26',
-        'octodns>=0.9.14',
-        'pycountry-convert>=0.7.2',
-    ),
+    tests_require=tests_require,
     url='https://github.com/octodns/octodns-route53',
     version=version(),
-    tests_require=(
-        'mock>=4.0.3',
-        'pytest',
-        'pytest-network',
-    ),
 )
