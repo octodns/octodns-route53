@@ -1,3 +1,8 @@
+## v0.0.4 - 2022-02-02 - pycountry-convert install_requires
+
+* install_requires includes pycountry-convert as it's a runtime requirement
+* other misc script/tooling improvements
+
 ## v0.0.3 - 2022-01-23 - What we really need
 
 * Fix boto -> boto3 type-o/problem with setup.py
