@@ -305,7 +305,7 @@ class TestRoute53Provider(TestCase):
             'target': 'cname.unit.tests.'
         }}),
         ('',
-         {'ttl': 67, 'type': 'NS', 'values': ['8.2.3.4.', '9.2.3.4.']}),
+         {'ttl': 67, 'type': 'NS', 'values': ['ns1.unit.tests.']}),
         ('sub',
          {'ttl': 68, 'type': 'NS', 'values': ['5.2.3.4.', '6.2.3.4.']}),
         ('',
@@ -445,11 +445,21 @@ class TestRoute53Provider(TestCase):
 
         # No records, essentially a no-op
         desired = Zone('unit.tests.', [])
+        ns_record = Record.new(desired, '', data={
+            'type': 'NS',
+            'ttl': 1800,
+            'values': (
+                'ns1.unit.tests.',
+                'ns2.unit.tests.',
+            ),
+        })
+        desired.add_record(ns_record)
         got = provider._process_desired_zone(desired)
         self.assertEqual(desired.records, got.records)
 
         # Record without any geos
         desired = Zone('unit.tests.', [])
+        desired.add_record(ns_record)
         record = Record.new(desired, 'a', {
             'ttl': 30,
             'type': 'A',
@@ -470,11 +480,13 @@ class TestRoute53Provider(TestCase):
         desired.add_record(record)
         got = provider._process_desired_zone(desired)
         self.assertEqual(desired.records, got.records)
-        self.assertEqual(1, len(list(got.records)[0].dynamic.rules))
-        self.assertFalse('geos' in list(got.records)[0].dynamic.rules[0].data)
+        dynamic = [r for r in got.records if r._type == 'A'][0]
+        self.assertEqual(1, len(dynamic.dynamic.rules))
+        self.assertFalse('geos' in dynamic.dynamic.rules[0].data)
 
         # Record where all geos are supported
         desired = Zone('unit.tests.', [])
+        desired.add_record(ns_record)
         record = Record.new(desired, 'a', {
             'ttl': 30,
             'type': 'A',
@@ -502,13 +514,15 @@ class TestRoute53Provider(TestCase):
         })
         desired.add_record(record)
         got = provider._process_desired_zone(desired)
-        self.assertEqual(2, len(list(got.records)[0].dynamic.rules))
+        dynamic = [r for r in got.records if r._type == 'A'][0]
+        self.assertEqual(2, len(dynamic.dynamic.rules))
         self.assertEqual(['EU', 'NA-US-OR'],
-                         list(got.records)[0].dynamic.rules[0].data['geos'])
-        self.assertFalse('geos' in list(got.records)[0].dynamic.rules[1].data)
+                         dynamic.dynamic.rules[0].data['geos'])
+        self.assertFalse('geos' in dynamic.dynamic.rules[1].data)
 
         # Record with NA-CA-* only rule which is removed
         desired = Zone('unit.tests.', [])
+        desired.add_record(ns_record)
         record = Record.new(desired, 'a', {
             'ttl': 30,
             'type': 'A',
@@ -536,11 +550,13 @@ class TestRoute53Provider(TestCase):
         })
         desired.add_record(record)
         got = provider._process_desired_zone(desired)
-        self.assertEqual(1, len(list(got.records)[0].dynamic.rules))
-        self.assertFalse('geos' in list(got.records)[0].dynamic.rules[0].data)
+        dynamic = [r for r in got.records if r._type == 'A'][0]
+        self.assertEqual(1, len(dynamic.dynamic.rules))
+        self.assertFalse('geos' in dynamic.dynamic.rules[0].data)
 
         # Record with NA-CA-* rule combined with other geos, filtered
         desired = Zone('unit.tests.', [])
+        desired.add_record(ns_record)
         record = Record.new(desired, 'a', {
             'ttl': 30,
             'type': 'A',
@@ -568,10 +584,11 @@ class TestRoute53Provider(TestCase):
         })
         desired.add_record(record)
         got = provider._process_desired_zone(desired)
-        self.assertEqual(2, len(list(got.records)[0].dynamic.rules))
+        dynamic = [r for r in got.records if r._type == 'A'][0]
+        self.assertEqual(2, len(dynamic.dynamic.rules))
         self.assertEqual(['EU', 'NA-US-OR'],
-                         list(got.records)[0].dynamic.rules[0].data['geos'])
-        self.assertFalse('geos' in list(got.records)[0].dynamic.rules[1].data)
+                         dynamic.dynamic.rules[0].data['geos'])
+        self.assertFalse('geos' in dynamic.dynamic.rules[1].data)
 
     # with fallback boto makes an unstubbed call to the 169. metadata api, this
     # stubs that bit out
@@ -808,7 +825,7 @@ class TestRoute53Provider(TestCase):
                              {'HostedZoneId': 'z42'})
 
         plan = provider.plan(self.expected)
-        self.assertEqual(9, len(plan.changes))
+        self.assertEqual(10, len(plan.changes))
         self.assertTrue(plan.exists)
         for change in plan.changes:
             self.assertIsInstance(change, Create)
@@ -828,7 +845,7 @@ class TestRoute53Provider(TestCase):
                                  'SubmittedAt': '2017-01-29T01:02:03Z',
                              }}, {'HostedZoneId': 'z42', 'ChangeBatch': ANY})
 
-        self.assertEqual(9, provider.apply(plan))
+        self.assertEqual(10, provider.apply(plan))
         stubber.assert_no_pending_responses()
 
         # Delete by monkey patching in a populate that includes an extra record
@@ -1041,7 +1058,7 @@ class TestRoute53Provider(TestCase):
                              {})
 
         plan = provider.plan(self.expected)
-        self.assertEqual(9, len(plan.changes))
+        self.assertEqual(10, len(plan.changes))
         self.assertFalse(plan.exists)
         for change in plan.changes:
             self.assertIsInstance(change, Create)
@@ -1108,7 +1125,7 @@ class TestRoute53Provider(TestCase):
                                  'SubmittedAt': '2017-01-29T01:02:03Z',
                              }}, {'HostedZoneId': 'z42', 'ChangeBatch': ANY})
 
-        self.assertEqual(9, provider.apply(plan))
+        self.assertEqual(10, provider.apply(plan))
         stubber.assert_no_pending_responses()
 
     def test_sync_create_with_delegation_set(self):
@@ -1126,7 +1143,7 @@ class TestRoute53Provider(TestCase):
                              {})
 
         plan = provider.plan(self.expected)
-        self.assertEqual(9, len(plan.changes))
+        self.assertEqual(10, len(plan.changes))
         self.assertFalse(plan.exists)
         for change in plan.changes:
             self.assertIsInstance(change, Create)
@@ -1194,7 +1211,7 @@ class TestRoute53Provider(TestCase):
                                  'SubmittedAt': '2017-01-29T01:02:03Z',
                              }}, {'HostedZoneId': 'z42', 'ChangeBatch': ANY})
 
-        self.assertEqual(9, provider.apply(plan))
+        self.assertEqual(10, provider.apply(plan))
         stubber.assert_no_pending_responses()
 
     def test_health_checks_pagination(self):
@@ -2051,7 +2068,7 @@ class TestRoute53Provider(TestCase):
         )
 
         plan = provider.plan(self.expected)
-        self.assertEqual(9, len(plan.changes))
+        self.assertEqual(10, len(plan.changes))
 
         create_hosted_zone_resp = {
             'HostedZone': {
@@ -2114,7 +2131,7 @@ class TestRoute53Provider(TestCase):
                                  'SubmittedAt': '2017-01-29T01:02:03Z',
                              }}, {'HostedZoneId': 'z42', 'ChangeBatch': ANY})
 
-        self.assertEqual(9, provider.apply(plan))
+        self.assertEqual(10, provider.apply(plan))
         stubber.assert_no_pending_responses()
 
     def test_plan_apply_with_get_zones_by_name_zone_exists(self):
@@ -2166,7 +2183,7 @@ class TestRoute53Provider(TestCase):
                              {'HostedZoneId': 'z42'})
 
         plan = provider.plan(self.expected)
-        self.assertEqual(10, len(plan.changes))
+        self.assertEqual(11, len(plan.changes))
 
         stubber.add_response('list_health_checks',
                              {
@@ -2183,7 +2200,7 @@ class TestRoute53Provider(TestCase):
                                  'SubmittedAt': '2017-01-29T01:02:03Z',
                              }}, {'HostedZoneId': 'z42', 'ChangeBatch': ANY})
 
-        self.assertEqual(10, provider.apply(plan))
+        self.assertEqual(11, provider.apply(plan))
         stubber.assert_no_pending_responses()
 
     def test_extra_change_no_health_check(self):
@@ -2846,6 +2863,12 @@ class TestRoute53Provider(TestCase):
                              }}, {'HostedZoneId': 'z42', 'ChangeBatch': ANY})
 
         plan = provider.plan(self.expected)
+
+        # filtering out the root NS here b/c all of these tests predated
+        # support for it and accounting for it will require significant
+        # rejiggering of the tests (it's not important to what's being tested)
+        plan.changes = [c for c in plan.changes
+                        if c.new._type != 'NS' or c.new.name != '']
 
         return provider, plan
 
