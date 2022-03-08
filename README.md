@@ -72,6 +72,10 @@ zones:
 
 A, AAAA, CAA, CNAME, MX, NAPTR, NS, PTR, SPF, SRV, TXT
 
+#### Root NS Records
+
+Route53Provider supports full root NS record management.
+
 #### Dynamic
 
 Route53Provider supports dynamic records, CNAME health checks don't support a Host header.
