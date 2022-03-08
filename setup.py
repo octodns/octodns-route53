@@ -37,7 +37,7 @@ setup(
     },
     install_requires=(
         'boto3>=1.20.26',
-        'octodns>=0.9.14',
+        'octodns>=0.9.16',
         'pycountry-convert>=0.7.2',
     ),
     license='MIT',
