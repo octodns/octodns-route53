@@ -27,10 +27,14 @@ def _octal_replace(s):
     #     DomainNameFormat.html
     return octal_re.sub(lambda m: chr(int(m.group(1), 8)), s)
 
-def _hash_record(s):
-    hash_object = hashlib.sha512(s.encode())
-    hash_hex = hash_object.hexdigest()
-    return(hash_hex[0:20])
+def _healthcheck_ref_prefix(version, record_type, record_fqdn):
+    ref = f'{version}:{record_type}:{record_fqdn}:'
+    # the + 12 is to allow space for the uuid that allows multiple healthchecks per record to exist
+    if len(ref) + 12 > 64:
+        hash_object = hashlib.sha512(record_fqdn.encode())
+        hash_hex = hash_object.hexdigest()
+        ref = f'{version}:{record_type}:{hash_hex[0:20]}:'
+    return ref
 
 class _Route53Record(EqualityTupleMixin):
 
@@ -1184,9 +1188,7 @@ class Route53Provider(BaseProvider):
 
         # we're looking for a healthcheck with the current version & our record
         # type, we'll ignore anything else
-        hashed_record = _hash_record(f"{record.fqdn}")
-        expected_ref = \
-            f'{self.HEALTH_CHECK_VERSION}:{record._type}:{hashed_record}:'
+        expected_ref = _healthcheck_ref_prefix(self.HEALTH_CHECK_VERSION, record._type, record.fqdn)
         for id, health_check in self.health_checks.items():
             if not health_check['CallerReference'].startswith(expected_ref):
                 # not match, ignore
@@ -1227,8 +1229,8 @@ class Route53Provider(BaseProvider):
         if value:
             config['IPAddress'] = value
 
-        hashed_record = _hash_record(f"{record.fqdn}")
-        ref = f'{self.HEALTH_CHECK_VERSION}:{record._type}:{hashed_record}:' + \
+        expected_ref = _healthcheck_ref_prefix(self.HEALTH_CHECK_VERSION, record._type, record.fqdn)
+        ref = f'{expected_ref}:' + \
             uuid4().hex[:12]
         resp = self._conn.create_health_check(CallerReference=ref,
                                               HealthCheckConfig=config)
