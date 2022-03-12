@@ -12,7 +12,7 @@ import logging
 import re
 
 from octodns.equality import EqualityTupleMixin
-from octodns.record import Record, Update
+from octodns.record import Create, Record, Update
 from octodns.record.geo import GeoCodes
 from octodns.provider import ProviderException
 from octodns.provider.base import BaseProvider
@@ -607,6 +607,7 @@ class Route53Provider(BaseProvider):
     SUPPORTS_GEO = True
     SUPPORTS_DYNAMIC = True
     SUPPORTS_POOL_VALUE_STATUS = True
+    SUPPORTS_ROOT_NS = True
     SUPPORTS = set(('A', 'AAAA', 'CAA', 'CNAME', 'MX', 'NAPTR', 'NS', 'PTR',
                     'SPF', 'SRV', 'TXT'))
 
@@ -1487,6 +1488,12 @@ class Route53Provider(BaseProvider):
         existing_rrsets = self._load_records(zone_id)
         for c in changes:
             # Generate the mods for this change
+            if isinstance(c, Create):
+                new = c.new
+                if new._type == 'NS' and new.name == '':
+                    # Root NS records are never created, they come w/the zone,
+                    # convert the create into an Update
+                    c = Update(new, new)
             klass = c.__class__.__name__
             mod_type = getattr(self, f'_mod_{klass}')
             mods = mod_type(c, zone_id, existing_rrsets)
