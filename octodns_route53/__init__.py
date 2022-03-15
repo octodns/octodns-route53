@@ -30,13 +30,13 @@ def _octal_replace(s):
 
 
 def _healthcheck_ref_prefix(version, record_type, record_fqdn):
-    ref = f'{version}:{record_type}:{record_fqdn}:'
-    # the + 12 is to allow space for the uuid
+    ref = f'{version}:{record_type}:{record_fqdn}'
+    # the + 13 is to allow space for the uuid and ':'
     # it is allowing multiple healthchecks per record to exist
-    if len(ref) + 12 > 64:
+    if len(ref) + 13 > 64:
         hash_object = hashlib.sha512(record_fqdn.encode())
         hash_hex = hash_object.hexdigest()
-        ref = f'{version}:{record_type}:{hash_hex[0:20]}:'
+        ref = f'{version}:{record_type}:{hash_hex[0:20]}'
     return ref
 
 

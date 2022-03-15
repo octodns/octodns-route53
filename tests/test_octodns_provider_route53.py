@@ -67,7 +67,28 @@ class TestHealthCheckRefPrefix(TestCase):
         ]:
             self.assertLessEqual(len(_healthcheck_ref_prefix(
                 Route53Provider.HEALTH_CHECK_VERSION, "CNAME", s)),
-                (64 - 12))
+                (64 - 13))
+
+        for expected, s in (
+            ('', ''),
+            ('test.com', 'test.com'),
+            ('just.enough.to.leave.fqdn.there.test.com',
+                'just.enough.to.leave.fqdn.there.test.com'),
+            ('1195893dcaf4af70915e',
+                'just.enough.not.leave.fqdn.there.test.com'),
+            ('008ffbe028b7fe7d8b16',
+                '0001:CNAME:this.is.a.very.longggggggg.'
+                'record.for.testing.purposes.com')
+        ):
+            print(_healthcheck_ref_prefix(
+                Route53Provider.HEALTH_CHECK_VERSION, "CNAME", s)
+            )
+            self.assertEqual(
+                f"{Route53Provider.HEALTH_CHECK_VERSION}:CNAME:{expected}",
+                _healthcheck_ref_prefix(
+                    Route53Provider.HEALTH_CHECK_VERSION, "CNAME", s
+                )
+            )
 
 
 dynamic_rrsets = [{
