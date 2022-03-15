@@ -12,7 +12,7 @@ from octodns.zone import Zone
 
 from octodns_route53 import Route53Provider, _Route53DynamicValue, \
     _Route53GeoDefault, _Route53GeoRecord, Route53ProviderException, \
-    _Route53Record, _mod_keyer, _octal_replace
+    _Route53Record, _mod_keyer, _octal_replace, _healthcheck_ref_prefix
 from octodns_route53.processor import AwsAcmMangingProcessor
 
 
@@ -56,6 +56,36 @@ class TestOctalReplace(TestCase):
             ('**', '\\052\\052'),
         ):
             self.assertEqual(expected, _octal_replace(s))
+
+
+class TestHealthCheckRefPrefix(TestCase):
+
+    def test_basic(self):
+        for s in [
+            'test.com',
+            'this.is.a.very.longggggggg.record.for.testing.purposes.com'
+        ]:
+            self.assertLessEqual(len(_healthcheck_ref_prefix(
+                Route53Provider.HEALTH_CHECK_VERSION, "CNAME", s)),
+                (64 - 13))
+
+        for expected, s in (
+            ('', ''),
+            ('test.com', 'test.com'),
+            ('just.enough.to.leave.fqdn.there.test.com',
+                'just.enough.to.leave.fqdn.there.test.com'),
+            ('1195893dcaf4af70915e',
+                'just.enough.not.leave.fqdn.there.test.com'),
+            ('008ffbe028b7fe7d8b16',
+                '0001:CNAME:this.is.a.very.longggggggg.'
+                'record.for.testing.purposes.com')
+        ):
+            self.assertEqual(
+                f"{Route53Provider.HEALTH_CHECK_VERSION}:CNAME:{expected}",
+                _healthcheck_ref_prefix(
+                    Route53Provider.HEALTH_CHECK_VERSION, "CNAME", s
+                )
+            )
 
 
 dynamic_rrsets = [{
