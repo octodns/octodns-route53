@@ -80,9 +80,6 @@ class TestHealthCheckRefPrefix(TestCase):
                 '0001:CNAME:this.is.a.very.longggggggg.'
                 'record.for.testing.purposes.com')
         ):
-            print(_healthcheck_ref_prefix(
-                Route53Provider.HEALTH_CHECK_VERSION, "CNAME", s)
-            )
             self.assertEqual(
                 f"{Route53Provider.HEALTH_CHECK_VERSION}:CNAME:{expected}",
                 _healthcheck_ref_prefix(
