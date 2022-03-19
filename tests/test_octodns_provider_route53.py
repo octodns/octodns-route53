@@ -347,10 +347,13 @@ class TestRoute53Provider(TestCase):
              'value': 'ca.unit.tests'
          }}),
         ('alias',
-         {'ttl': 942942942, 'type': 'Route53Provider/ALIAS', 'value': {
-             'name': 'unit.tests.',
+         {'ttl': 942942942, 'type': 'Route53Provider/ALIAS', 'values': [{
+             'name': '',
              'type': 'A',
-         }}),
+         }, {
+             'name': 'naptr',
+             'type': 'NAPTR',
+         }]}),
     ):
         record = Record.new(expected, name, data)
         expected.add_record(record)
@@ -815,7 +818,14 @@ class TestRoute53Provider(TestCase):
                 },
                 'Type': 'A',
                 'Name': 'alias.unit.tests.',
-                'TTL': 70,
+            }, {
+                'AliasTarget': {
+                    'HostedZoneId': 'Z119WBBTVP5WFX',
+                    'EvaluateTargetHealth': False,
+                    'DNSName': 'naptr.unit.tests.'
+                },
+                'Type': 'NAPTR',
+                'Name': 'alias.unit.tests.',
             }],
             'IsTruncated': False,
             'MaxItems': '100',
@@ -3676,10 +3686,10 @@ class TestRoute53AliasRecord(TestCase):
     def test_basics(self):
         alias = Route53AliasRecord(zone, 'alias', {
             'values': [{
-                'name': f'something.{zone.name}',
+                'name': 'something',
                 'type': 'A',
             }, {
-                'name': f'another.{zone.name}',
+                'name': '',
                 'type': 'AAAA',
             }],
             'ttl': 42,
@@ -3689,7 +3699,7 @@ class TestRoute53AliasRecord(TestCase):
         v1 = alias.values[1]
 
         self.assertEqual({
-            'name': 'something.unit.tests.',
+            'name': 'something',
             'type': 'A'
         }, v0.data)
 
@@ -3702,7 +3712,6 @@ class TestRoute53AliasRecord(TestCase):
         v0.__repr__()
 
         self.assertEqual([
-            'missing name',
             'missing type'
         ], _Route53AliasValue.validate({}, Route53AliasRecord._type))
 
@@ -3714,10 +3723,10 @@ class TestRoute53AliasRecord(TestCase):
     def test_route53_record_conversion(self):
         alias = Route53AliasRecord(zone, 'alias', {
             'values': [{
-                'name': f'something.{zone.name}',
+                'name': 'something',
                 'type': 'A',
             }, {
-                'name': f'another.{zone.name}',
+                'name': None,
                 'type': 'AAAA',
             }],
             'ttl': 42,
@@ -3741,7 +3750,7 @@ class TestRoute53AliasRecord(TestCase):
             'Action': 'create',
             'ResourceRecordSet': {
                 'AliasTarget': {
-                    'DNSName': 'another.unit.tests.',
+                    'DNSName': 'unit.tests.',
                     'EvaluateTargetHealth': False,
                     'HostedZoneId': 'z42'
                 },

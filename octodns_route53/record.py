@@ -10,8 +10,6 @@ class _Route53AliasValue(EqualityTupleMixin):
             data = (data,)
         reasons = []
         for value in data:
-            if 'name' not in value:
-                reasons.append('missing name')
             if 'type' not in value:
                 reasons.append('missing type')
 
@@ -22,8 +20,10 @@ class _Route53AliasValue(EqualityTupleMixin):
         return [_Route53AliasValue(v) for v in values]
 
     def __init__(self, value):
-        self.name = value['name']
+        self.name = value.get('name', '')
         self._type = value['type']
+        self.evaluate_target_health = value.get('evaluate-target-health',
+                                                False)
 
     @property
     def data(self):

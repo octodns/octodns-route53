@@ -272,8 +272,14 @@ class _Route53Alias(_Route53Record):
         super().__init__(provider, record, creating)
         self.hosted_zone_id = hosted_zone_id
         self.fqdn = record.fqdn
-        self.target_name = value.name
+        name = value.name
+        # Add the zone name since Route53 expects the fqdn of the target
+        if name:
+            self.target_name = f'{value.name}.{record.zone.name}'
+        else:
+            self.target_name = record.zone.name
         self.target_type = value._type
+        self.evaluate_target_health = value.evaluate_target_health
 
     def mod(self, action, existing_rrsets):
         return {
@@ -281,7 +287,7 @@ class _Route53Alias(_Route53Record):
             'ResourceRecordSet': {
                 'AliasTarget': {
                     'DNSName': self.target_name,
-                    'EvaluateTargetHealth': False,
+                    'EvaluateTargetHealth': self.evaluate_target_health,
                     'HostedZoneId': self.hosted_zone_id,
                 },
                 'Name': self.fqdn,
@@ -1024,7 +1030,9 @@ class Route53Provider(BaseProvider):
 
         return data
 
-    def _data_for_route53_alias(self, rrsets):
+    def _data_for_route53_alias(self, rrsets, zone_name):
+        # We'll trim off the zone name off the target below
+        zone_name_len = len(zone_name) + 1
         values = []
         for rrset in rrsets:
             target = rrset['AliasTarget']
@@ -1032,7 +1040,8 @@ class Route53Provider(BaseProvider):
             # other records in the same zone. Need more data/examples to
             # support things like ELB targets and all the other options
             values.append({
-                'name': target['DNSName'],
+                'evaluate-target-health': target['EvaluateTargetHealth'],
+                'name': target['DNSName'][:-zone_name_len],
                 'type': rrset['Type'],
             })
         return {
@@ -1150,8 +1159,9 @@ class Route53Provider(BaseProvider):
             # be synced.  It's a bit ugly, but there's nothing we can do since
             # octoDNS requires a TTL and Route53 doesn't have one on their
             # ALIAS records.
+            zone_name = zone.name
             for name, rrsets in aliases.items():
-                data = self._data_for_route53_alias(rrsets)
+                data = self._data_for_route53_alias(rrsets, zone_name)
                 data['ttl'] = 942942942
                 record = Record.new(zone, name, data, source=self,
                                     lenient=lenient)
