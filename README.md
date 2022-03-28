@@ -85,6 +85,7 @@ Route53Provider supports dynamic records, CNAME health checks don't support a Ho
 `Route53Provider/ALIAS` adds support for the Route53 specific symlink style alias records.
 
 ```yaml
+# "symlink" to another record in the same zone
 alias:
     type: Route53Provider/ALIAS
     values:
@@ -92,8 +93,19 @@ alias:
     - type: A
     # ALIAS for www.whatever.com. AAAA
     - evaluate-target-health: false
+      # same-zone aliases omit the zone name
       name: www
       type: AAAA
+# "symlink" to a AWS service
+alb:
+    type: Route53Provider/ALIAS
+    value:
+        # default for evaluate-target-health is False
+        evaluate-target-health: true
+        # hosted-zone-id should only be used when pointing to service endpoints
+        hosted-zone-id: Z42SXDOTRQ7X7K
+        name: dualstack.octodns-testing-1165866977.us-east-1.elb.amazonaws.com.
+        type: A
 ```
 
 #### Health Check Options

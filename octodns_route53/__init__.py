@@ -50,9 +50,12 @@ class _Route53Record(EqualityTupleMixin):
         # this from looks like /hostedzone/Z424CArX3BB224
         hosted_zone_id = hosted_zone_id.split('/', 2)[-1]
 
+        # Use the value's hosted_zone_id if it has one (service symlink), if
+        # not fall back to using the one for the current zone (local record
+        # symlink)
         return set([
-            _Route53Alias(provider, hosted_zone_id, record, value, creating)
-            for value in record.values
+            _Route53Alias(provider, value.hosted_zone_id or hosted_zone_id,
+                          record, value, creating) for value in record.values
         ])
 
     @classmethod
@@ -273,10 +276,16 @@ class _Route53Alias(_Route53Record):
         self.hosted_zone_id = hosted_zone_id
         self.fqdn = record.fqdn
         name = value.name
-        # Add the zone name since Route53 expects the fqdn of the target
         if name:
-            self.target_name = f'{value.name}.{record.zone.name}'
+            if 'amazonaws.com.' in name:
+                # It's a service symlink, just use it as is
+                self.target_name = name
+            else:
+                # Add the zone name since Route53 expects the fqdn of the
+                # target
+                self.target_name = f'{value.name}.{record.zone.name}'
         else:
+            # It targets the zone APEX
             self.target_name = record.zone.name
         self.target_type = value._type
         self.evaluate_target_health = value.evaluate_target_health
@@ -1031,17 +1040,24 @@ class Route53Provider(BaseProvider):
         return data
 
     def _data_for_route53_alias(self, rrsets, zone_name):
-        # We'll trim off the zone name off the target below
         zone_name_len = len(zone_name) + 1
         values = []
         for rrset in rrsets:
             target = rrset['AliasTarget']
-            # TODO: this only supports the symlink style alias pointing to
-            # other records in the same zone. Need more data/examples to
-            # support things like ELB targets and all the other options
+            name = target['DNSName']
+            if 'amazonaws.com.' in name:
+                # We only set hosted_zone_id when it's a "service" alias, when
+                # it's a pointer to the current zone it'll be None
+                hosted_zone_id = target['HostedZoneId']
+            else:
+                # We'll trim off the zone name off the target
+                name = name[:-zone_name_len]
+                # hosted_zone_id is unused
+                hosted_zone_id = None
             values.append({
                 'evaluate-target-health': target['EvaluateTargetHealth'],
-                'name': target['DNSName'][:-zone_name_len],
+                'hosted-zone-id': hosted_zone_id,
+                'name': name,
                 'type': rrset['Type'],
             })
         return {
