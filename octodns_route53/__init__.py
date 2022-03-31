@@ -1126,9 +1126,23 @@ class Route53Provider(BaseProvider):
                 'route53.healthcheck.request_interval '
                 'parameter must be either 10 or 30.')
 
+    def _healthcheck_failure_threshold(self, record):
+        threshold = record._octodns.get('route53', {}) \
+            .get('healthcheck', {}) \
+            .get('failure_threshold', 6)
+        if (isinstance(threshold, int) and
+                threshold >= 1 and threshold <= 10):
+            return threshold
+        else:
+            raise Route53ProviderException(
+                'route53.healthcheck.failure_threshold '
+                'parameter must be an integer '
+                'between 1 and 10.')
+
     def _health_check_equivalent(self, host, path, protocol, port,
                                  measure_latency, request_interval,
-                                 health_check, value=None, disabled=None,
+                                 failure_threshold, health_check,
+                                 value=None, disabled=None,
                                  inverted=None):
         config = health_check['HealthCheckConfig']
 
@@ -1152,6 +1166,7 @@ class Route53Provider(BaseProvider):
             port == config['Port'] and \
             measure_latency == config['MeasureLatency'] and \
             request_interval == config['RequestInterval'] and \
+            failure_threshold == config['FailureThreshold'] and \
             (disabled is None or disabled == config['Disabled']) and \
             (inverted is None or inverted == config['Inverted']) and \
             value == config_ip_address
@@ -1184,6 +1199,7 @@ class Route53Provider(BaseProvider):
         healthcheck_port = record.healthcheck_port
         healthcheck_latency = self._healthcheck_measure_latency(record)
         healthcheck_interval = self._healthcheck_request_interval(record)
+        healthcheck_threshold = self._healthcheck_failure_threshold(record)
         if status == 'down':
             healthcheck_disabled = True
             healthcheck_inverted = True
@@ -1205,6 +1221,7 @@ class Route53Provider(BaseProvider):
                                              healthcheck_port,
                                              healthcheck_latency,
                                              healthcheck_interval,
+                                             healthcheck_threshold,
                                              health_check,
                                              value=value,
                                              disabled=healthcheck_disabled,
@@ -1223,7 +1240,7 @@ class Route53Provider(BaseProvider):
             'Disabled': healthcheck_disabled,
             'Inverted': healthcheck_inverted,
             'EnableSNI': healthcheck_protocol == 'HTTPS',
-            'FailureThreshold': 6,
+            'FailureThreshold': healthcheck_threshold,
             'MeasureLatency': healthcheck_latency,
             'Port': healthcheck_port,
             'RequestInterval': healthcheck_interval,
@@ -1365,6 +1382,7 @@ class Route53Provider(BaseProvider):
         healthcheck_port = record.healthcheck_port
         healthcheck_latency = self._healthcheck_measure_latency(record)
         healthcheck_interval = self._healthcheck_request_interval(record)
+        healthcheck_threshold = self._healthcheck_failure_threshold(record)
 
         status = statuses.get(value, 'obey')
         if status == 'up':
@@ -1388,6 +1406,7 @@ class Route53Provider(BaseProvider):
                                                  healthcheck_port,
                                                  healthcheck_latency,
                                                  healthcheck_interval,
+                                                 healthcheck_threshold,
                                                  health_check):
                     # it has the right health check
                     return False

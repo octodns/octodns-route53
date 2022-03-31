@@ -365,6 +365,7 @@ class TestRoute53Provider(TestCase):
             'Port': 443,
             'MeasureLatency': True,
             'RequestInterval': 10,
+            'FailureThreshold': 6,
         },
         'HealthCheckVersion': 2,
     }, {
@@ -382,6 +383,7 @@ class TestRoute53Provider(TestCase):
             'Port': 443,
             'MeasureLatency': True,
             'RequestInterval': 10,
+            'FailureThreshold': 6,
         },
         'HealthCheckVersion': 42,
     }, {
@@ -399,6 +401,7 @@ class TestRoute53Provider(TestCase):
             'Port': 443,
             'MeasureLatency': True,
             'RequestInterval': 10,
+            'FailureThreshold': 6,
         },
         'HealthCheckVersion': 2,
     }, {
@@ -416,6 +419,7 @@ class TestRoute53Provider(TestCase):
             'Port': 443,
             'MeasureLatency': True,
             'RequestInterval': 10,
+            'FailureThreshold': 6,
         },
         'HealthCheckVersion': 2,
     }, {
@@ -434,6 +438,7 @@ class TestRoute53Provider(TestCase):
             'Port': 443,
             'MeasureLatency': True,
             'RequestInterval': 10,
+            'FailureThreshold': 6,
         },
         'HealthCheckVersion': 2,
     }]
@@ -1262,6 +1267,7 @@ class TestRoute53Provider(TestCase):
                 'Port': 443,
                 'MeasureLatency': True,
                 'RequestInterval': 10,
+                'FailureThreshold': 6,
             },
             'HealthCheckVersion': 2,
         }, {
@@ -1279,6 +1285,7 @@ class TestRoute53Provider(TestCase):
                 'Port': 443,
                 'MeasureLatency': True,
                 'RequestInterval': 10,
+                'FailureThreshold': 6,
             },
             'HealthCheckVersion': 2,
         }]
@@ -1306,6 +1313,7 @@ class TestRoute53Provider(TestCase):
                 'Port': 443,
                 'MeasureLatency': True,
                 'RequestInterval': 10,
+                'FailureThreshold': 6,
             },
             'HealthCheckVersion': 2,
         }]
@@ -1355,6 +1363,7 @@ class TestRoute53Provider(TestCase):
                 'Port': 443,
                 'MeasureLatency': True,
                 'RequestInterval': 10,
+                'FailureThreshold': 6,
             },
             'HealthCheckVersion': 2,
         }, {
@@ -1372,6 +1381,7 @@ class TestRoute53Provider(TestCase):
                 'Port': 443,
                 'MeasureLatency': True,
                 'RequestInterval': 10,
+                'FailureThreshold': 6,
             },
             'HealthCheckVersion': 2,
         }, {
@@ -1389,6 +1399,7 @@ class TestRoute53Provider(TestCase):
                 'Port': 443,
                 'MeasureLatency': True,
                 'RequestInterval': 10,
+                'FailureThreshold': 6,
             },
             'HealthCheckVersion': 2,
         }]
@@ -1475,6 +1486,7 @@ class TestRoute53Provider(TestCase):
                 'Port': 443,
                 'MeasureLatency': True,
                 'RequestInterval': 10,
+                'FailureThreshold': 6,
             },
             'HealthCheckVersion': 2,
         }]
@@ -1522,6 +1534,7 @@ class TestRoute53Provider(TestCase):
             'MeasureLatency': True,
             'Port': 8080,
             'RequestInterval': 10,
+            'FailureThreshold': 6,
             'ResourcePath': '/_status',
             'Type': 'HTTP'
         }
@@ -1582,6 +1595,7 @@ class TestRoute53Provider(TestCase):
             'MeasureLatency': True,
             'Port': 8080,
             'RequestInterval': 10,
+            'FailureThreshold': 6,
             'ResourcePath': '/_status',
             'Type': 'HTTP'
         }
@@ -1614,6 +1628,7 @@ class TestRoute53Provider(TestCase):
             'MeasureLatency': True,
             'Port': 8080,
             'RequestInterval': 10,
+            'FailureThreshold': 6,
             'Type': 'TCP'
         }
         stubber.add_response('create_health_check', {
@@ -1649,14 +1664,17 @@ class TestRoute53Provider(TestCase):
                     'healthcheck': {
                         'measure_latency': True,
                         'request_interval': 10,
+                        'failure_threshold': 3,
                     }
                 }
             }
         })
         latency = provider._healthcheck_measure_latency(record)
         interval = provider._healthcheck_request_interval(record)
+        threshold = provider._healthcheck_failure_threshold(record)
         self.assertTrue(latency)
         self.assertEqual(10, interval)
+        self.assertEqual(3, threshold)
 
         record_default = Record.new(self.expected, 'a', {
             'ttl': 61,
@@ -1665,8 +1683,10 @@ class TestRoute53Provider(TestCase):
         })
         latency = provider._healthcheck_measure_latency(record_default)
         interval = provider._healthcheck_request_interval(record_default)
+        threshold = provider._healthcheck_failure_threshold(record_default)
         self.assertTrue(latency)
         self.assertEqual(10, interval)
+        self.assertEqual(6, threshold)
 
         record = Record.new(self.expected, 'a', {
             'ttl': 61,
@@ -1679,14 +1699,17 @@ class TestRoute53Provider(TestCase):
                     'healthcheck': {
                         'measure_latency': False,
                         'request_interval': 30,
+                        'failure_threshold': 10
                     }
                 }
             }
         })
         latency = provider._healthcheck_measure_latency(record)
         interval = provider._healthcheck_request_interval(record)
+        threshold = provider._healthcheck_failure_threshold(record)
         self.assertFalse(latency)
         self.assertEqual(30, interval)
+        self.assertEqual(10, threshold)
 
         record_invalid = Record.new(self.expected, 'a', {
             'ttl': 61,
@@ -1705,6 +1728,40 @@ class TestRoute53Provider(TestCase):
         with self.assertRaises(Route53ProviderException):
             interval = provider._healthcheck_request_interval(record_invalid)
 
+        record_invalid = Record.new(self.expected, 'a', {
+            'ttl': 61,
+            'type': 'A',
+            'value': '1.2.3.4',
+            'octodns': {
+                'healthcheck': {
+                },
+                'route53': {
+                    'healthcheck': {
+                        'failure_threshold': 0,
+                    }
+                }
+            }
+        })
+        with self.assertRaises(Route53ProviderException):
+            threshold = provider._healthcheck_failure_threshold(record_invalid)
+
+        record_invalid = Record.new(self.expected, 'a', {
+            'ttl': 61,
+            'type': 'A',
+            'value': '1.2.3.4',
+            'octodns': {
+                'healthcheck': {
+                },
+                'route53': {
+                    'healthcheck': {
+                        'failure_threshold': 1.1,
+                    }
+                }
+            }
+        })
+        with self.assertRaises(Route53ProviderException):
+            threshold = provider._healthcheck_failure_threshold(record_invalid)
+
     def test_create_health_checks_provider_options(self):
         provider, stubber = self._get_stubbed_provider()
 
@@ -1712,7 +1769,7 @@ class TestRoute53Provider(TestCase):
             'Disabled': False,
             'EnableSNI': True,
             'Inverted': False,
-            'FailureThreshold': 6,
+            'FailureThreshold': 2,
             'FullyQualifiedDomainName': 'a.unit.tests',
             'IPAddress': '1.2.3.4',
             'MeasureLatency': False,
@@ -1757,7 +1814,8 @@ class TestRoute53Provider(TestCase):
                 'route53': {
                     'healthcheck': {
                         'measure_latency': False,
-                        'request_interval': 30
+                        'request_interval': 30,
+                        'failure_threshold': 2
                     }
                 }
             }
@@ -1864,6 +1922,7 @@ class TestRoute53Provider(TestCase):
                 'Port': 443,
                 'MeasureLatency': True,
                 'RequestInterval': 10,
+                'FailureThreshold': 6,
             },
             'HealthCheckVersion': 2,
         }, {
@@ -1881,6 +1940,7 @@ class TestRoute53Provider(TestCase):
                 'Port': 443,
                 'MeasureLatency': True,
                 'RequestInterval': 10,
+                'FailureThreshold': 6,
             },
             'HealthCheckVersion': 2,
         }, {
@@ -1898,6 +1958,7 @@ class TestRoute53Provider(TestCase):
                 'Port': 443,
                 'MeasureLatency': True,
                 'RequestInterval': 10,
+                'FailureThreshold': 6,
             },
             'HealthCheckVersion': 2,
         }]
@@ -2342,6 +2403,7 @@ class TestRoute53Provider(TestCase):
                     'Port': 443,
                     'MeasureLatency': True,
                     'RequestInterval': 10,
+                    'FailureThreshold': 6,
                 },
                 'HealthCheckVersion': 2,
             }],
@@ -2450,6 +2512,7 @@ class TestRoute53Provider(TestCase):
                     'Port': 443,
                     'MeasureLatency': True,
                     'RequestInterval': 10,
+                    'FailureThreshold': 6,
                 },
                 'HealthCheckVersion': 2,
             }],
@@ -2602,6 +2665,7 @@ class TestRoute53Provider(TestCase):
                     'Port': 443,
                     'MeasureLatency': True,
                     'RequestInterval': 10,
+                    'FailureThreshold': 6,
                 },
                 'HealthCheckVersion': 2,
             }],
@@ -2804,6 +2868,7 @@ class TestRoute53Provider(TestCase):
                     'Port': 443,
                     'MeasureLatency': True,
                     'RequestInterval': 10,
+                    'FailureThreshold': 6,
                 },
                 'HealthCheckVersion': 2,
             }],
