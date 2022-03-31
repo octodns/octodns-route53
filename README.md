@@ -114,6 +114,7 @@ See https://github.com/octodns/octodns/blob/master/docs/dynamic_records.md#healt
 
 | Key  | Description | Default |
 |--|--|--|
+| failure_threshold | Failure threshold before state change, 1-10 | 6 |
 | measure_latency | Show latency in AWS console | true |
 | request_interval | Healthcheck interval [10\|30] seconds | 10 |
 
@@ -127,6 +128,7 @@ See https://github.com/octodns/octodns/blob/master/docs/dynamic_records.md#healt
       protocol: HTTPS
     route53:
       healthcheck:
+        failure_threshold: 3
         measure_latency: false
         request_interval: 30
 ```
