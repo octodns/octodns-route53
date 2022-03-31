@@ -1135,7 +1135,7 @@ class Route53Provider(BaseProvider):
             return threshold
         else:
             raise Route53ProviderException(
-                'route53.healthcheck.threshold '
+                'route53.healthcheck.failure_threshold '
                 'parameter must be an integer '
                 'between 1 and 10.')
 
