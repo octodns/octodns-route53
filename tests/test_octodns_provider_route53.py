@@ -3765,6 +3765,20 @@ class TestRoute53AliasRecord(TestCase):
             'type': 'A',
         }, Route53AliasRecord._type))
 
+        # valid service (cloudfront)
+        self.assertEqual([], _Route53AliasValue.validate({
+            'name': 'foo.bar.cloudfront.net.',
+            'hosted-zone-id': 'good',
+            'type': 'A',
+        }, Route53AliasRecord._type))
+
+        # valid service (elasticbeanstalk)
+        self.assertEqual([], _Route53AliasValue.validate({
+            'name': 'foo.bar.elasticbeanstalk.com.',
+            'hosted-zone-id': 'good',
+            'type': 'A',
+        }, Route53AliasRecord._type))
+
     def test_route53_record_conversion(self):
         alias = Route53AliasRecord(zone, 'alias', {
             'values': [{

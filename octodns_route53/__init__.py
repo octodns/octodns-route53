@@ -42,28 +42,6 @@ def _healthcheck_ref_prefix(version, record_type, record_fqdn):
     return ref
 
 
-# Since Route53's alias type reuses the same keys for different types of
-# records with nothing to definitively indicate whether it's a service or
-# same-zone symlink we need to guess which based on the fqdn. We can't do an
-# `endswith` due to cases where there are country specific endings on the fqdn,
-# e.g. `.cn`. No clue if this will work for gov-cloud etc. If you encounter a
-# case where a service isn't correctly being detected please open a PR adding
-# it's fqdn bit to the list here or an issue if that doesn't make sense.
-# https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/resource-record-sets-values-alias-common.html#rrsets-values-alias-common-target
-_service_fqdns = (
-    'amazonaws.com.',
-    'cloudfront.net.',
-    'elasticbeanstalk.com.',
-)
-
-
-def _service_alias(name):
-    for service_fqdn in _service_fqdns:
-        if service_fqdn in name:
-            return True
-    return False
-
-
 class _Route53Record(EqualityTupleMixin):
 
     @classmethod
@@ -299,7 +277,7 @@ class _Route53Alias(_Route53Record):
         self.fqdn = record.fqdn
         name = value.name
         if name:
-            if _service_alias(name):
+            if Route53AliasRecord.is_service_alias(name):
                 # It's a service symlink, just use it as is
                 self.target_name = name
             else:
@@ -1067,7 +1045,7 @@ class Route53Provider(BaseProvider):
         for rrset in rrsets:
             target = rrset['AliasTarget']
             name = target['DNSName']
-            if _service_alias(name):
+            if Route53AliasRecord.is_service_alias(name):
                 # We only set hosted_zone_id when it's a "service" alias, when
                 # it's a pointer to the current zone it'll be None
                 hosted_zone_id = target['HostedZoneId']
