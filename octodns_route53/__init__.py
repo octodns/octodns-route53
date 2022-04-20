@@ -1396,7 +1396,7 @@ class Route53Provider(BaseProvider):
         return id
 
     def _gc_health_checks(self, record, new):
-        if record._type not in ('A', 'AAAA'):
+        if record._type not in ('A', 'AAAA', 'CNAME'):
             return
         self.log.debug('_gc_health_checks: record=%s', record)
         # Find the health checks we're using for the new route53 records
