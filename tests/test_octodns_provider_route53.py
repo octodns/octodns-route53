@@ -10,9 +10,11 @@ from unittest.mock import patch
 from octodns.record import Create, Delete, Record, Update
 from octodns.zone import Zone
 
-from octodns_route53 import Route53Provider, _Route53DynamicValue, \
-    _Route53GeoDefault, _Route53GeoRecord, Route53ProviderException, \
-    _Route53Record, _mod_keyer, _octal_replace, _healthcheck_ref_prefix
+from octodns_route53 import Route53Provider, _Route53Alias, \
+    _Route53DynamicValue, _Route53GeoDefault, _Route53GeoRecord, \
+    Route53ProviderException, _Route53Record, _mod_keyer, _octal_replace, \
+    _healthcheck_ref_prefix
+from octodns_route53.record import _Route53AliasValue, Route53AliasRecord
 from octodns_route53.processor import AwsAcmMangingProcessor
 
 
@@ -344,6 +346,22 @@ class TestRoute53Provider(TestCase):
              'tag': 'issue',
              'value': 'ca.unit.tests'
          }}),
+        ('alias',
+         {'ttl': 942942942, 'type': 'Route53Provider/ALIAS', 'values': [{
+             'name': '',
+             'type': 'A',
+         }, {
+             'name': 'naptr',
+             'type': 'NAPTR',
+         }]}),
+        ('alb',
+         {'ttl': 942942942, 'type': 'Route53Provider/ALIAS', 'values': [{
+             'evaluate-target-health': True,
+             'hosted-zone-id': 'Z35SXDOTRQ7X7K',
+             'name': 'dualstack.octodns-testing-1425816977.us-east-1.elb.'
+             'amazonaws.com.',
+             'type': 'A',
+         }]}),
     ):
         record = Record.new(expected, name, data)
         expected.add_record(record)
@@ -812,7 +830,24 @@ class TestRoute53Provider(TestCase):
                     'DNSName': 'unit.tests.'
                 },
                 'Type': 'A',
-                'Name': 'alias.unit.tests.'
+                'Name': 'alias.unit.tests.',
+            }, {
+                'AliasTarget': {
+                    'HostedZoneId': 'Z119WBBTVP5WFX',
+                    'EvaluateTargetHealth': False,
+                    'DNSName': 'naptr.unit.tests.'
+                },
+                'Type': 'NAPTR',
+                'Name': 'alias.unit.tests.',
+            }, {
+                'AliasTarget': {
+                    'HostedZoneId': 'Z35SXDOTRQ7X7K',
+                    'EvaluateTargetHealth': True,
+                    'DNSName': 'dualstack.octodns-testing-1425816977.'
+                    'us-east-1.elb.amazonaws.com.',
+                },
+                'Type': 'A',
+                'Name': 'alb.unit.tests.',
             }],
             'IsTruncated': False,
             'MaxItems': '100',
@@ -860,7 +895,7 @@ class TestRoute53Provider(TestCase):
                              {'HostedZoneId': 'z42'})
 
         plan = provider.plan(self.expected)
-        self.assertEqual(10, len(plan.changes))
+        self.assertEqual(12, len(plan.changes))
         self.assertTrue(plan.exists)
         for change in plan.changes:
             self.assertIsInstance(change, Create)
@@ -880,7 +915,7 @@ class TestRoute53Provider(TestCase):
                                  'SubmittedAt': '2017-01-29T01:02:03Z',
                              }}, {'HostedZoneId': 'z42', 'ChangeBatch': ANY})
 
-        self.assertEqual(10, provider.apply(plan))
+        self.assertEqual(12, provider.apply(plan))
         stubber.assert_no_pending_responses()
 
         # Delete by monkey patching in a populate that includes an extra record
@@ -1093,7 +1128,7 @@ class TestRoute53Provider(TestCase):
                              {})
 
         plan = provider.plan(self.expected)
-        self.assertEqual(10, len(plan.changes))
+        self.assertEqual(12, len(plan.changes))
         self.assertFalse(plan.exists)
         for change in plan.changes:
             self.assertIsInstance(change, Create)
@@ -1160,7 +1195,7 @@ class TestRoute53Provider(TestCase):
                                  'SubmittedAt': '2017-01-29T01:02:03Z',
                              }}, {'HostedZoneId': 'z42', 'ChangeBatch': ANY})
 
-        self.assertEqual(10, provider.apply(plan))
+        self.assertEqual(12, provider.apply(plan))
         stubber.assert_no_pending_responses()
 
     def test_sync_create_with_delegation_set(self):
@@ -1178,7 +1213,7 @@ class TestRoute53Provider(TestCase):
                              {})
 
         plan = provider.plan(self.expected)
-        self.assertEqual(10, len(plan.changes))
+        self.assertEqual(12, len(plan.changes))
         self.assertFalse(plan.exists)
         for change in plan.changes:
             self.assertIsInstance(change, Create)
@@ -1246,7 +1281,7 @@ class TestRoute53Provider(TestCase):
                                  'SubmittedAt': '2017-01-29T01:02:03Z',
                              }}, {'HostedZoneId': 'z42', 'ChangeBatch': ANY})
 
-        self.assertEqual(10, provider.apply(plan))
+        self.assertEqual(12, provider.apply(plan))
         stubber.assert_no_pending_responses()
 
     def test_health_checks_pagination(self):
@@ -2159,7 +2194,7 @@ class TestRoute53Provider(TestCase):
         )
 
         plan = provider.plan(self.expected)
-        self.assertEqual(10, len(plan.changes))
+        self.assertEqual(12, len(plan.changes))
 
         create_hosted_zone_resp = {
             'HostedZone': {
@@ -2222,7 +2257,7 @@ class TestRoute53Provider(TestCase):
                                  'SubmittedAt': '2017-01-29T01:02:03Z',
                              }}, {'HostedZoneId': 'z42', 'ChangeBatch': ANY})
 
-        self.assertEqual(10, provider.apply(plan))
+        self.assertEqual(12, provider.apply(plan))
         stubber.assert_no_pending_responses()
 
     def test_plan_apply_with_get_zones_by_name_zone_exists(self):
@@ -2274,7 +2309,7 @@ class TestRoute53Provider(TestCase):
                              {'HostedZoneId': 'z42'})
 
         plan = provider.plan(self.expected)
-        self.assertEqual(11, len(plan.changes))
+        self.assertEqual(13, len(plan.changes))
 
         stubber.add_response('list_health_checks',
                              {
@@ -2291,7 +2326,7 @@ class TestRoute53Provider(TestCase):
                                  'SubmittedAt': '2017-01-29T01:02:03Z',
                              }}, {'HostedZoneId': 'z42', 'ChangeBatch': ANY})
 
-        self.assertEqual(11, provider.apply(plan))
+        self.assertEqual(13, provider.apply(plan))
         stubber.assert_no_pending_responses()
 
     def test_extra_change_no_health_check(self):
@@ -3726,3 +3761,132 @@ class TestAwsAcmMangingProcessor(TestCase):
             '_deadbeef.not-cname',
             '_not-acm'
         ], sorted([r.name for r in got.records]))
+
+
+class TestRoute53AliasRecord(TestCase):
+
+    def test_basics(self):
+        alias = Route53AliasRecord(zone, 'alias', {
+            'values': [{
+                'name': 'something',
+                'type': 'A',
+            }, {
+                'name': '',
+                'type': 'AAAA',
+            }],
+            'ttl': 42,
+        })
+
+        v0 = alias.values[0]
+        v1 = alias.values[1]
+
+        self.assertEqual({
+            'evaluate-target-health': False,
+            'hosted-zone-id': None,
+            'name': 'something',
+            'type': 'A'
+        }, v0.data)
+
+        self.assertEqual(hash(v0), hash(v0))
+        self.assertEqual(hash(v1), hash(v1))
+        self.assertNotEqual(hash(v0), hash(v1))
+        self.assertNotEqual(hash(v1), hash(v0))
+
+        # make sure this doesn't blow up
+        v0.__repr__()
+
+        # No type
+        self.assertEqual([
+            'missing type',
+        ], _Route53AliasValue.validate({}, Route53AliasRecord._type))
+
+        # service alias w/o hosted-zone-id
+        self.assertEqual([
+            'service alias without hosted-zone-id',
+        ], _Route53AliasValue.validate({
+            'name': 'foo.bar.amazonaws.com.cn',
+            'type': Route53AliasRecord._type,
+        }, Route53AliasRecord._type))
+
+        # local zone alias with hosted-zone-id
+        self.assertEqual([
+            'hosted-zone-id on a non-service value',
+        ], _Route53AliasValue.validate({
+            'name': 'www',
+            'hosted-zone-id': 'bad',
+            'type': Route53AliasRecord._type,
+        }, Route53AliasRecord._type))
+
+        # valid local zone
+        self.assertEqual([], _Route53AliasValue.validate({
+            'name': 'name',
+            'type': 'A',
+        }, Route53AliasRecord._type))
+
+        # valid service
+        self.assertEqual([], _Route53AliasValue.validate({
+            'name': 'foo.bar.amazonaws.com.cn',
+            'hosted-zone-id': 'good',
+            'type': 'A',
+        }, Route53AliasRecord._type))
+
+        # valid service (cloudfront)
+        self.assertEqual([], _Route53AliasValue.validate({
+            'name': 'foo.bar.cloudfront.net.',
+            'hosted-zone-id': 'good',
+            'type': 'A',
+        }, Route53AliasRecord._type))
+
+        # valid service (elasticbeanstalk)
+        self.assertEqual([], _Route53AliasValue.validate({
+            'name': 'foo.bar.elasticbeanstalk.com.',
+            'hosted-zone-id': 'good',
+            'type': 'A',
+        }, Route53AliasRecord._type))
+
+    def test_route53_record_conversion(self):
+        alias = Route53AliasRecord(zone, 'alias', {
+            'values': [{
+                'name': 'something',
+                'type': 'A',
+            }, {
+                'name': None,
+                'type': 'AAAA',
+            }],
+            'ttl': 42,
+        })
+
+        r53a0 = _Route53Alias(None, 'z42', alias, alias.values[0], True)
+        self.assertEqual({
+            'Action': 'create',
+            'ResourceRecordSet': {
+                'AliasTarget': {
+                    'DNSName': 'something.unit.tests.',
+                    'EvaluateTargetHealth': False,
+                    'HostedZoneId': 'z42'
+                },
+                'Name': 'alias.unit.tests.',
+                'Type': 'A'
+            }
+        }, r53a0.mod('create', None))
+        r53a1 = _Route53Alias(None, 'z42', alias, alias.values[1], True)
+        self.assertEqual({
+            'Action': 'create',
+            'ResourceRecordSet': {
+                'AliasTarget': {
+                    'DNSName': 'unit.tests.',
+                    'EvaluateTargetHealth': False,
+                    'HostedZoneId': 'z42'
+                },
+                'Name': 'alias.unit.tests.',
+                'Type': 'AAAA'
+            }
+        }, r53a1.mod('create', None))
+
+        self.assertEqual(hash(r53a0), hash(r53a0))
+        self.assertEqual(hash(r53a1), hash(r53a1))
+        self.assertNotEqual(hash(r53a0), hash(r53a1))
+        self.assertNotEqual(hash(r53a1), hash(r53a0))
+
+        # doesn't blow up
+        r53a0.__repr__()

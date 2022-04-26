@@ -18,6 +18,8 @@ from octodns.record.geo import GeoCodes
 from octodns.provider import ProviderException
 from octodns.provider.base import BaseProvider
 
+from .record import Route53AliasRecord
+
 __VERSION__ = '0.0.4'
 
 octal_re = re.compile(r'\\(\d\d\d)')
@@ -41,6 +43,20 @@ def _healthcheck_ref_prefix(version, record_type, record_fqdn):
 
 
 class _Route53Record(EqualityTupleMixin):
+
+    @classmethod
+    def _new_route53_alias(cls, provider, record, hosted_zone_id, creating):
+        # HostedZoneId wants just the last bit, but the place we're getting
+        # this from looks like /hostedzone/Z424CArX3BB224
+        hosted_zone_id = hosted_zone_id.split('/', 2)[-1]
+
+        # Use the value's hosted_zone_id if it has one (service symlink), if
+        # not fall back to using the one for the current zone (local record
+        # symlink)
+        return set([
+            _Route53Alias(provider, value.hosted_zone_id or hosted_zone_id,
+                          record, value, creating) for value in record.values
+        ])
 
     @classmethod
     def _new_dynamic(cls, provider, record, hosted_zone_id, creating):
@@ -138,6 +154,9 @@ class _Route53Record(EqualityTupleMixin):
             return ret
         elif getattr(record, 'geo', False):
             return cls._new_geo(provider, record, creating)
+        elif record._type == Route53AliasRecord._type:
+            return cls._new_route53_alias(provider, record, hosted_zone_id,
+                                          creating)
 
         # Its a simple record that translates into a single RRSet
         return set((_Route53Record(provider, record, creating),))
@@ -146,11 +165,20 @@ class _Route53Record(EqualityTupleMixin):
         self.fqdn = fqdn_override or record.fqdn
         self._type = record._type
         self.ttl = record.ttl
+        self.record = record
 
-        values_for = getattr(self, f'_values_for_{self._type}')
-        self.values = values_for(record)
+        self._values = None
+
+    @property
+    def values(self):
+        if self._values is None:
+            _type = self._type.replace('/', '_')
+            values_for = getattr(self, f'_values_for_{_type}')
+            self._values = values_for(self.record)
+        return self._values
 
     def mod(self, action, existing_rrsets):
+
         return {
             'Action': action,
             'ResourceRecordSet': {
@@ -239,6 +267,49 @@ class _Route53Record(EqualityTupleMixin):
 
     def _values_for_SRV(self, record):
         return [self._value_for_SRV(v, record) for v in record.values]
+
+
+class _Route53Alias(_Route53Record):
+
+    def __init__(self, provider, hosted_zone_id, record, value, creating):
+        super().__init__(provider, record, creating)
+        self.hosted_zone_id = hosted_zone_id
+        self.fqdn = record.fqdn
+        name = value.name
+        if name:
+            if Route53AliasRecord.is_service_alias(name):
+                # It's a service symlink, just use it as is
+                self.target_name = name
+            else:
+                # Add the zone name since Route53 expects the fqdn of the
+                # target
+                self.target_name = f'{value.name}.{record.zone.name}'
+        else:
+            # It targets the zone APEX
+            self.target_name = record.zone.name
+        self.target_type = value._type
+        self.evaluate_target_health = value.evaluate_target_health
+
+    def mod(self, action, existing_rrsets):
+        return {
+            'Action': action,
+            'ResourceRecordSet': {
+                'AliasTarget': {
+                    'DNSName': self.target_name,
+                    'EvaluateTargetHealth': self.evaluate_target_health,
+                    'HostedZoneId': self.hosted_zone_id,
+                },
+                'Name': self.fqdn,
+                'Type': self.target_type,
+            }
+        }
+
+    def __hash__(self):
+        return f'{self.fqdn}:{self.target_type}:{self.target_name}'.__hash__()
+
+    def __repr__(self):
+        return f'_Route53Alias<{self.fqdn} {self.target_type} ' \
+            f'{self.target_name}>'
 
 
 class _Route53DynamicPool(_Route53Record):
@@ -621,7 +692,7 @@ class Route53Provider(BaseProvider):
     SUPPORTS_POOL_VALUE_STATUS = True
     SUPPORTS_ROOT_NS = True
     SUPPORTS = set(('A', 'AAAA', 'CAA', 'CNAME', 'MX', 'NAPTR', 'NS', 'PTR',
-                    'SPF', 'SRV', 'TXT'))
+                    'SPF', 'SRV', 'TXT', Route53AliasRecord._type))
 
     # This should be bumped when there are underlying changes made to the
     # health check config.
@@ -968,6 +1039,32 @@ class Route53Provider(BaseProvider):
 
         return data
 
+    def _data_for_route53_alias(self, rrsets, zone_name):
+        zone_name_len = len(zone_name) + 1
+        values = []
+        for rrset in rrsets:
+            target = rrset['AliasTarget']
+            name = target['DNSName']
+            if Route53AliasRecord.is_service_alias(name):
+                # We only set hosted_zone_id when it's a "service" alias, when
+                # it's a pointer to the current zone it'll be None
+                hosted_zone_id = target['HostedZoneId']
+            else:
+                # We'll trim off the zone name off the target
+                name = name[:-zone_name_len]
+                # hosted_zone_id is unused
+                hosted_zone_id = None
+            values.append({
+                'evaluate-target-health': target['EvaluateTargetHealth'],
+                'hosted-zone-id': hosted_zone_id,
+                'name': name,
+                'type': rrset['Type'],
+            })
+        return {
+            'type': Route53AliasRecord._type,
+            'values': values,
+        }
+
     def _process_desired_zone(self, desired):
         for record in desired.records:
             if getattr(record, 'dynamic', False):
@@ -1016,6 +1113,7 @@ class Route53Provider(BaseProvider):
             exists = True
             records = defaultdict(lambda: defaultdict(list))
             dynamic = defaultdict(lambda: defaultdict(list))
+            aliases = defaultdict(list)
 
             for rrset in self._load_records(zone_id):
                 record_name = zone.hostname_from_fqdn(rrset['Name'])
@@ -1037,10 +1135,7 @@ class Route53Provider(BaseProvider):
                         # Part of a dynamic record
                         dynamic[record_name][record_type].append(rrset)
                     else:
-                        # Alias records are Route53 specific and are not
-                        # portable, so we need to skip them
-                        self.log.warning("%s is an Alias record. Skipping..."
-                                         % rrset['Name'])
+                        aliases[record_name].append(rrset)
                     continue
                 # A basic record (potentially including geo)
                 data = getattr(self, f'_data_for_{record_type}')(rrset)
@@ -1073,6 +1168,20 @@ class Route53Provider(BaseProvider):
                     record = Record.new(zone, name, data, source=self,
                                         lenient=lenient)
                     zone.add_record(record, lenient=lenient)
+
+            # Route53 Aliases don't have TTLs so we're setting a dummy value
+            # here and will ignore any ttl-only changes down below in
+            # _include_change in order to avoid persistent changes that can't
+            # be synced.  It's a bit ugly, but there's nothing we can do since
+            # octoDNS requires a TTL and Route53 doesn't have one on their
+            # ALIAS records.
+            zone_name = zone.name
+            for name, rrsets in aliases.items():
+                data = self._data_for_route53_alias(rrsets, zone_name)
+                data['ttl'] = 942942942
+                record = Record.new(zone, name, data, source=self,
+                                    lenient=lenient)
+                zone.add_record(record, lenient=lenient)
 
         self.log.info('populate:   found %s records, exists=%s',
                       len(zone.records) - before, exists)
@@ -1508,6 +1617,11 @@ class Route53Provider(BaseProvider):
                     extras.append(Update(record, record))
 
         return extras
+
+    def _include_change(self, change):
+        return not (isinstance(change, Update) and
+                    change.new._type == Route53AliasRecord._type and
+                    change.new.values == change.existing.values)
 
     def _apply(self, plan):
         desired = plan.desired

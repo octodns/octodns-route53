@@ -2,6 +2,8 @@
 
 * Enable SUPPORTS_ROOT_NS for management of root NS records. Requires
   octodns>=0.9.16.
+* Add support for Route53Provider/ALIAS provider-specific type, see README for
+  more information.
 
 ## v0.0.4 - 2022-02-02 - pycountry-convert install_requires
 

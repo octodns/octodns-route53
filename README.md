@@ -80,6 +80,34 @@ Route53Provider supports full root NS record management.
 
 Route53Provider supports dynamic records, CNAME health checks don't support a Host header.
 
+#### Provider Specific Types
+
+`Route53Provider/ALIAS` adds support for the Route53 specific symlink style alias records.
+
+```yaml
+# "symlink" to another record in the same zone
+alias:
+    type: Route53Provider/ALIAS
+    values:
+    # ALIAS for the zone APEX A record
+    - type: A
+    # ALIAS for www.whatever.com. AAAA
+    - evaluate-target-health: false
+      # same-zone aliases omit the zone name
+      name: www
+      type: AAAA
+# "symlink" to a AWS service
+alb:
+    type: Route53Provider/ALIAS
+    value:
+        # default for evaluate-target-health is False
+        evaluate-target-health: true
+        # hosted-zone-id should only be used when pointing to service endpoints
+        hosted-zone-id: Z42SXDOTRQ7X7K
+        name: dualstack.octodns-testing-1165866977.us-east-1.elb.amazonaws.com.
+        type: A
+```
+
 #### Health Check Options
 
 See https://github.com/octodns/octodns/blob/master/docs/dynamic_records.md#health-checks for information on health checking for dynamic records. Route53Provider supports the following options:
