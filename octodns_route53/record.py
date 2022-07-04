@@ -3,7 +3,6 @@ from octodns.equality import EqualityTupleMixin
 
 
 class _Route53AliasValue(EqualityTupleMixin):
-
     @classmethod
     def validate(cls, data, _type):
         if not isinstance(data, (list, tuple)):
@@ -28,8 +27,7 @@ class _Route53AliasValue(EqualityTupleMixin):
     def __init__(self, value):
         self.name = value.get('name') or ''
         self._type = value['type']
-        self.evaluate_target_health = value.get('evaluate-target-health',
-                                                False)
+        self.evaluate_target_health = value.get('evaluate-target-health', False)
         self.hosted_zone_id = value.get('hosted-zone-id')
 
     @property

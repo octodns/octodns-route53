@@ -43,7 +43,6 @@ def _healthcheck_ref_prefix(version, record_type, record_fqdn):
 
 
 class _Route53Record(EqualityTupleMixin):
-
     @classmethod
     def _new_route53_alias(cls, provider, record, hosted_zone_id, creating):
         # HostedZoneId wants just the last bit, but the place we're getting
@@ -53,10 +52,18 @@ class _Route53Record(EqualityTupleMixin):
         # Use the value's hosted_zone_id if it has one (service symlink), if
         # not fall back to using the one for the current zone (local record
         # symlink)
-        return set([
-            _Route53Alias(provider, value.hosted_zone_id or hosted_zone_id,
-                          record, value, creating) for value in record.values
-        ])
+        return set(
+            [
+                _Route53Alias(
+                    provider,
+                    value.hosted_zone_id or hosted_zone_id,
+                    record,
+                    value,
+                    creating,
+                )
+                for value in record.values
+            ]
+        )
 
     @classmethod
     def _new_dynamic(cls, provider, record, hosted_zone_id, creating):
@@ -71,8 +78,11 @@ class _Route53Record(EqualityTupleMixin):
         # record object. Its only used if all other values fail their
         # healthchecks, which hopefully never happens.
         fqdn = record.fqdn
-        ret.add(_Route53Record(provider, record, creating,
-                               f'_octodns-default-pool.{fqdn}'))
+        ret.add(
+            _Route53Record(
+                provider, record, creating, f'_octodns-default-pool.{fqdn}'
+            )
+        )
 
         # Pools
         for pool_name, pool in record.dynamic.pools.items():
@@ -81,8 +91,11 @@ class _Route53Record(EqualityTupleMixin):
             # rrsets will point to when they want to use a pool of values. It's
             # a primary and observes target health so if all the values for
             # this pool go red, we'll use the fallback/SECONDARY just below
-            ret.add(_Route53DynamicPool(provider, hosted_zone_id, record,
-                                        pool_name, creating))
+            ret.add(
+                _Route53DynamicPool(
+                    provider, hosted_zone_id, record, pool_name, creating
+                )
+            )
 
             # Create the fallback for this pool
             fallback = pool.data.get('fallback', False)
@@ -90,16 +103,30 @@ class _Route53Record(EqualityTupleMixin):
                 # We have an explicitly configured fallback, another pool to
                 # use if all our values go red. This RRSet configures that pool
                 # as the next best option
-                ret.add(_Route53DynamicPool(provider, hosted_zone_id, record,
-                                            pool_name, creating,
-                                            target_name=fallback))
+                ret.add(
+                    _Route53DynamicPool(
+                        provider,
+                        hosted_zone_id,
+                        record,
+                        pool_name,
+                        creating,
+                        target_name=fallback,
+                    )
+                )
             else:
                 # We fallback on the default, no explicit fallback so if all of
                 # this pool's values go red we'll fallback to the base
                 # (non-health-checked) default pool of values
-                ret.add(_Route53DynamicPool(provider, hosted_zone_id, record,
-                                            pool_name, creating,
-                                            target_name='default'))
+                ret.add(
+                    _Route53DynamicPool(
+                        provider,
+                        hosted_zone_id,
+                        record,
+                        pool_name,
+                        creating,
+                        target_name='default',
+                    )
+                )
 
             # Create the values for this pool. These are health checked and in
             # general each unique value will have an associated healthcheck.
@@ -109,9 +136,18 @@ class _Route53Record(EqualityTupleMixin):
                 weight = value['weight']
                 status = value['status']
                 value = value['value']
-                ret.add(_Route53DynamicValue(provider, record, pool_name,
-                                             value, weight, status, i,
-                                             creating))
+                ret.add(
+                    _Route53DynamicValue(
+                        provider,
+                        record,
+                        pool_name,
+                        value,
+                        weight,
+                        status,
+                        i,
+                        creating,
+                    )
+                )
 
         # Rules
         for i, rule in enumerate(record.dynamic.rules):
@@ -121,15 +157,26 @@ class _Route53Record(EqualityTupleMixin):
                 for geo in geos:
                     # Create a RRSet for each geo in each rule that uses the
                     # desired target pool
-                    ret.add(_Route53DynamicRule(provider, hosted_zone_id,
-                                                record, pool_name, i,
-                                                creating, geo=geo))
+                    ret.add(
+                        _Route53DynamicRule(
+                            provider,
+                            hosted_zone_id,
+                            record,
+                            pool_name,
+                            i,
+                            creating,
+                            geo=geo,
+                        )
+                    )
             else:
                 # There's no geo's for this rule so it's the catchall that will
                 # just point things that don't match any geo rules to the
                 # specified pool
-                ret.add(_Route53DynamicRule(provider, hosted_zone_id, record,
-                                            pool_name, i, creating))
+                ret.add(
+                    _Route53DynamicRule(
+                        provider, hosted_zone_id, record, pool_name, i, creating
+                    )
+                )
 
         return ret
 
@@ -140,8 +187,7 @@ class _Route53Record(EqualityTupleMixin):
 
         ret.add(_Route53GeoDefault(provider, record, creating))
         for ident, geo in record.geo.items():
-            ret.add(_Route53GeoRecord(provider, record, ident, geo,
-                                      creating))
+            ret.add(_Route53GeoRecord(provider, record, ident, geo, creating))
 
         return ret
 
@@ -155,8 +201,9 @@ class _Route53Record(EqualityTupleMixin):
         elif getattr(record, 'geo', False):
             return cls._new_geo(provider, record, creating)
         elif record._type == Route53AliasRecord._type:
-            return cls._new_route53_alias(provider, record, hosted_zone_id,
-                                          creating)
+            return cls._new_route53_alias(
+                provider, record, hosted_zone_id, creating
+            )
 
         # Its a simple record that translates into a single RRSet
         return set((_Route53Record(provider, record, creating),))
@@ -186,7 +233,7 @@ class _Route53Record(EqualityTupleMixin):
                 'ResourceRecords': [{'Value': v} for v in self.values],
                 'TTL': self.ttl,
                 'Type': self._type,
-            }
+            },
         }
 
     # NOTE: we're using __hash__ and ordering methods that consider
@@ -203,8 +250,10 @@ class _Route53Record(EqualityTupleMixin):
         return (self.__class__.__name__, self.fqdn, self._type)
 
     def __repr__(self):
-        return '_Route53Record<{self.fqdn} {self._type} {self.ttl} ' \
+        return (
+            '_Route53Record<{self.fqdn} {self._type} {self.ttl} '
             f'{self.values}>'
+        )
 
     def _value_convert_value(self, value, record):
         return value
@@ -244,8 +293,10 @@ class _Route53Record(EqualityTupleMixin):
         flags = value.flags if value.flags else ''
         service = value.service if value.service else ''
         regexp = value.regexp if value.regexp else ''
-        return f'{value.order} {value.preference} "{flags}" "{service}" ' \
+        return (
+            f'{value.order} {value.preference} "{flags}" "{service}" '
             f'"{regexp}" {value.replacement}'
+        )
 
     def _values_for_NAPTR(self, record):
         return [self._value_convert_NAPTR(v, record) for v in record.values]
@@ -270,7 +321,6 @@ class _Route53Record(EqualityTupleMixin):
 
 
 class _Route53Alias(_Route53Record):
-
     def __init__(self, provider, hosted_zone_id, record, value, creating):
         super().__init__(provider, record, creating)
         self.hosted_zone_id = hosted_zone_id
@@ -301,24 +351,33 @@ class _Route53Alias(_Route53Record):
                 },
                 'Name': self.fqdn,
                 'Type': self.target_type,
-            }
+            },
         }
 
     def __hash__(self):
         return f'{self.fqdn}:{self.target_type}:{self.target_name}'.__hash__()
 
     def __repr__(self):
-        return f'_Route53Alias<{self.fqdn} {self.target_type} ' \
+        return (
+            f'_Route53Alias<{self.fqdn} {self.target_type} '
             f'{self.target_name}>'
+        )
 
 
 class _Route53DynamicPool(_Route53Record):
-
-    def __init__(self, provider, hosted_zone_id, record, pool_name, creating,
-                 target_name=None):
+    def __init__(
+        self,
+        provider,
+        hosted_zone_id,
+        record,
+        pool_name,
+        creating,
+        target_name=None,
+    ):
         fqdn_override = f'_octodns-{pool_name}-pool.{record.fqdn}'
-        super(_Route53DynamicPool, self) \
-            .__init__(provider, record, creating, fqdn_override=fqdn_override)
+        super(_Route53DynamicPool, self).__init__(
+            provider, record, creating, fqdn_override=fqdn_override
+        )
 
         self.hosted_zone_id = hosted_zone_id
         self.pool_name = pool_name
@@ -354,21 +413,30 @@ class _Route53DynamicPool(_Route53Record):
                 'Name': self.fqdn,
                 'SetIdentifier': self.identifer,
                 'Type': self._type,
-            }
+            },
         }
 
     def __hash__(self):
         return f'{self.fqdn}:{self._type}:{self.identifer}'.__hash__()
 
     def __repr__(self):
-        return f'_Route53DynamicPool<{self.fqdn} {self._type} {self.mode} ' \
+        return (
+            f'_Route53DynamicPool<{self.fqdn} {self._type} {self.mode} '
             f'{self.target_dns_name}>'
+        )
 
 
 class _Route53DynamicRule(_Route53Record):
-
-    def __init__(self, provider, hosted_zone_id, record, pool_name, index,
-                 creating, geo=None):
+    def __init__(
+        self,
+        provider,
+        hosted_zone_id,
+        record,
+        pool_name,
+        index,
+        creating,
+        geo=None,
+    ):
         super(_Route53DynamicRule, self).__init__(provider, record, creating)
 
         self.hosted_zone_id = hosted_zone_id
@@ -389,9 +457,7 @@ class _Route53DynamicRule(_Route53Record):
                 'EvaluateTargetHealth': True,
                 'HostedZoneId': self.hosted_zone_id,
             },
-            'GeoLocation': {
-                'CountryCode': '*'
-            },
+            'GeoLocation': {'CountryCode': '*'},
             'Name': self.fqdn,
             'SetIdentifier': self.identifer,
             'Type': self._type,
@@ -406,34 +472,38 @@ class _Route53DynamicRule(_Route53Record):
                     'SubdivisionCode': geo['province_code'],
                 }
             elif geo['country_code']:
-                rrset['GeoLocation'] = {
-                    'CountryCode': geo['country_code']
-                }
+                rrset['GeoLocation'] = {'CountryCode': geo['country_code']}
             else:
-                rrset['GeoLocation'] = {
-                    'ContinentCode': geo['continent_code'],
-                }
+                rrset['GeoLocation'] = {'ContinentCode': geo['continent_code']}
 
-        return {
-            'Action': action,
-            'ResourceRecordSet': rrset,
-        }
+        return {'Action': action, 'ResourceRecordSet': rrset}
 
     def __hash__(self):
         return f'{self.fqdn}:{self._type}:{self.identifer}'.__hash__()
 
     def __repr__(self):
-        return f'_Route53DynamicRule<{self.fqdn} {self._type} {self.index} ' \
+        return (
+            f'_Route53DynamicRule<{self.fqdn} {self._type} {self.index} '
             f'{self.geo} {self.target_dns_name}>'
+        )
 
 
 class _Route53DynamicValue(_Route53Record):
-
-    def __init__(self, provider, record, pool_name, value, weight, status,
-                 index, creating):
+    def __init__(
+        self,
+        provider,
+        record,
+        pool_name,
+        value,
+        weight,
+        status,
+        index,
+        creating,
+    ):
         fqdn_override = f'_octodns-{pool_name}-value.{record.fqdn}'
-        super(_Route53DynamicValue, self).__init__(provider, record, creating,
-                                                   fqdn_override=fqdn_override)
+        super(_Route53DynamicValue, self).__init__(
+            provider, record, creating, fqdn_override=fqdn_override
+        )
 
         self.pool_name = pool_name
         self.status = status
@@ -442,9 +512,9 @@ class _Route53DynamicValue(_Route53Record):
         self.value = value_convert(value, record)
         self.weight = weight
 
-        self.health_check_id = provider.get_health_check_id(record, self.value,
-                                                            self.status,
-                                                            creating)
+        self.health_check_id = provider.get_health_check_id(
+            record, self.value, self.status, creating
+        )
 
     @property
     def identifer(self):
@@ -458,12 +528,10 @@ class _Route53DynamicValue(_Route53Record):
             # ensures we have the right health check id when there's multiple
             # potential matches)
             for existing in existing_rrsets:
-                if self.fqdn == existing.get('Name') and \
-                   self.identifer == existing.get('SetIdentifier', None):
-                    return {
-                        'Action': action,
-                        'ResourceRecordSet': existing,
-                    }
+                if self.fqdn == existing.get(
+                    'Name'
+                ) and self.identifer == existing.get('SetIdentifier', None):
+                    return {'Action': action, 'ResourceRecordSet': existing}
 
         ret = {
             'Action': action,
@@ -474,7 +542,7 @@ class _Route53DynamicValue(_Route53Record):
                 'TTL': self.ttl,
                 'Type': self._type,
                 'Weight': self.weight,
-            }
+            },
         }
 
         if self.health_check_id:
@@ -486,44 +554,45 @@ class _Route53DynamicValue(_Route53Record):
         return f'{self.fqdn}:{self._type}:{self.identifer}'.__hash__()
 
     def __repr__(self):
-        return f'_Route53DynamicValue<{self.fqdn} {self._type} ' \
+        return (
+            f'_Route53DynamicValue<{self.fqdn} {self._type} '
             f'{self.identifer} {self.value}>'
+        )
 
 
 class _Route53GeoDefault(_Route53Record):
-
     def mod(self, action, existing_rrsets):
         return {
             'Action': action,
             'ResourceRecordSet': {
                 'Name': self.fqdn,
-                'GeoLocation': {
-                    'CountryCode': '*'
-                },
+                'GeoLocation': {'CountryCode': '*'},
                 'ResourceRecords': [{'Value': v} for v in self.values],
                 'SetIdentifier': 'default',
                 'TTL': self.ttl,
                 'Type': self._type,
-            }
+            },
         }
 
     def __hash__(self):
         return f'{self.fqdn}:{self._type}:default'.__hash__()
 
     def __repr__(self):
-        return f'_Route53GeoDefault<{self.fqdn} {self._type} {self.ttl} ' \
+        return (
+            f'_Route53GeoDefault<{self.fqdn} {self._type} {self.ttl} '
             f'{self.values}>'
+        )
 
 
 class _Route53GeoRecord(_Route53Record):
-
     def __init__(self, provider, record, ident, geo, creating):
         super(_Route53GeoRecord, self).__init__(provider, record, creating)
         self.geo = geo
 
         value = geo.values[0]
-        self.health_check_id = provider.get_health_check_id(record, value,
-                                                            'obey', creating)
+        self.health_check_id = provider.get_health_check_id(
+            record, value, 'obey', creating
+        )
 
     def mod(self, action, existing_rrsets):
         geo = self.geo
@@ -536,18 +605,14 @@ class _Route53GeoRecord(_Route53Record):
             # ensures we have the right health check id when there's multiple
             # potential matches)
             for existing in existing_rrsets:
-                if fqdn == existing.get('Name') and \
-                   set_identifier == existing.get('SetIdentifier', None):
-                    return {
-                        'Action': action,
-                        'ResourceRecordSet': existing,
-                    }
+                if fqdn == existing.get(
+                    'Name'
+                ) and set_identifier == existing.get('SetIdentifier', None):
+                    return {'Action': action, 'ResourceRecordSet': existing}
 
         rrset = {
             'Name': self.fqdn,
-            'GeoLocation': {
-                'CountryCode': '*'
-            },
+            'GeoLocation': {'CountryCode': '*'},
             'ResourceRecords': [{'Value': v} for v in geo.values],
             'SetIdentifier': set_identifier,
             'TTL': self.ttl,
@@ -560,32 +625,28 @@ class _Route53GeoRecord(_Route53Record):
         if geo.subdivision_code:
             rrset['GeoLocation'] = {
                 'CountryCode': geo.country_code,
-                'SubdivisionCode': geo.subdivision_code
+                'SubdivisionCode': geo.subdivision_code,
             }
         elif geo.country_code:
-            rrset['GeoLocation'] = {
-                'CountryCode': geo.country_code
-            }
+            rrset['GeoLocation'] = {'CountryCode': geo.country_code}
         else:
-            rrset['GeoLocation'] = {
-                'ContinentCode': geo.continent_code
-            }
+            rrset['GeoLocation'] = {'ContinentCode': geo.continent_code}
 
-        return {
-            'Action': action,
-            'ResourceRecordSet': rrset,
-        }
+        return {'Action': action, 'ResourceRecordSet': rrset}
 
     def __hash__(self):
         return f'{self.fqdn}:{self._type}:{self.geo.code}'.__hash__()
 
     def _equality_tuple(self):
-        return super(_Route53GeoRecord, self)._equality_tuple() + \
-            (self.geo.code,)
+        return super(_Route53GeoRecord, self)._equality_tuple() + (
+            self.geo.code,
+        )
 
     def __repr__(self):
-        return f'_Route53GeoRecord<{self.fqdn} {self._type} {self.ttl} ' \
+        return (
+            f'_Route53GeoRecord<{self.fqdn} {self._type} {self.ttl} '
             f'{self.geo.code} {self.values}>'
+        )
 
 
 class Route53ProviderException(ProviderException):
@@ -687,28 +748,57 @@ class Route53Provider(BaseProvider):
 
     In general the account used will need full permissions on Route53.
     '''
+
     SUPPORTS_GEO = True
     SUPPORTS_DYNAMIC = True
     SUPPORTS_POOL_VALUE_STATUS = True
     SUPPORTS_ROOT_NS = True
-    SUPPORTS = set(('A', 'AAAA', 'CAA', 'CNAME', 'MX', 'NAPTR', 'NS', 'PTR',
-                    'SPF', 'SRV', 'TXT', Route53AliasRecord._type))
+    SUPPORTS = set(
+        (
+            'A',
+            'AAAA',
+            'CAA',
+            'CNAME',
+            'MX',
+            'NAPTR',
+            'NS',
+            'PTR',
+            'SPF',
+            'SRV',
+            'TXT',
+            Route53AliasRecord._type,
+        )
+    )
 
     # This should be bumped when there are underlying changes made to the
     # health check config.
     HEALTH_CHECK_VERSION = '0001'
 
-    def __init__(self, id, access_key_id=None, secret_access_key=None,
-                 max_changes=1000, client_max_attempts=None,
-                 session_token=None, delegation_set_id=None,
-                 get_zones_by_name=False, *args, **kwargs):
+    def __init__(
+        self,
+        id,
+        access_key_id=None,
+        secret_access_key=None,
+        max_changes=1000,
+        client_max_attempts=None,
+        session_token=None,
+        delegation_set_id=None,
+        get_zones_by_name=False,
+        *args,
+        **kwargs,
+    ):
         self.max_changes = max_changes
         self.delegation_set_id = delegation_set_id
         self.get_zones_by_name = get_zones_by_name
-        _msg = f'access_key_id={access_key_id}, secret_access_key=***, ' \
-               'session_token=***'
-        use_fallback_auth = access_key_id is None and \
-            secret_access_key is None and session_token is None
+        _msg = (
+            f'access_key_id={access_key_id}, secret_access_key=***, '
+            'session_token=***'
+        )
+        use_fallback_auth = (
+            access_key_id is None
+            and secret_access_key is None
+            and session_token is None
+        )
         if use_fallback_auth:
             _msg = 'auth=fallback'
         self.log = logging.getLogger(f'Route53Provider[{id}]')
@@ -717,17 +807,21 @@ class Route53Provider(BaseProvider):
 
         config = None
         if client_max_attempts is not None:
-            self.log.info('__init__: setting max_attempts to %d',
-                          client_max_attempts)
+            self.log.info(
+                '__init__: setting max_attempts to %d', client_max_attempts
+            )
             config = Config(retries={'max_attempts': client_max_attempts})
 
         if use_fallback_auth:
             self._conn = client('route53', config=config)
         else:
-            self._conn = client('route53', aws_access_key_id=access_key_id,
-                                aws_secret_access_key=secret_access_key,
-                                aws_session_token=session_token,
-                                config=config)
+            self._conn = client(
+                'route53',
+                aws_access_key_id=access_key_id,
+                aws_secret_access_key=secret_access_key,
+                aws_session_token=session_token,
+                config=config,
+            )
 
         self._r53_zones = None
         self._r53_rrsets = {}
@@ -737,9 +831,7 @@ class Route53Provider(BaseProvider):
         # attempt to get zone by name
         # limited to one as this should be unique
         id = None
-        resp = self._conn.list_hosted_zones_by_name(
-            DNSName=name, MaxItems="1"
-        )
+        resp = self._conn.list_hosted_zones_by_name(DNSName=name, MaxItems="1")
         if len(resp['HostedZones']) != 0:
             # if there is a response that starts with the name
             if resp['HostedZones'][0]['Name'].startswith(name):
@@ -781,15 +873,17 @@ class Route53Provider(BaseProvider):
         if create and not id:
             ref = uuid4().hex
             del_set = self.delegation_set_id
-            self.log.debug('_get_zone_id:   no matching zone, creating, '
-                           'ref=%s', ref)
+            self.log.debug(
+                '_get_zone_id:   no matching zone, creating, ' 'ref=%s', ref
+            )
             if del_set:
-                resp = self._conn.create_hosted_zone(Name=name,
-                                                     CallerReference=ref,
-                                                     DelegationSetId=del_set)
+                resp = self._conn.create_hosted_zone(
+                    Name=name, CallerReference=ref, DelegationSetId=del_set
+                )
             else:
-                resp = self._conn.create_hosted_zone(Name=name,
-                                                     CallerReference=ref)
+                resp = self._conn.create_hosted_zone(
+                    Name=name, CallerReference=ref
+                )
             self._r53_zones[name] = id = resp['HostedZone']['Id']
         return id
 
@@ -817,7 +911,7 @@ class Route53Provider(BaseProvider):
         ret = {
             'type': rrset['Type'],
             'values': [v['Value'] for v in rrset['ResourceRecords']],
-            'ttl': int(rrset['TTL'])
+            'ttl': int(rrset['TTL']),
         }
         geo = self._parse_geo(rrset)
         if geo:
@@ -831,22 +925,18 @@ class Route53Provider(BaseProvider):
         values = []
         for rr in rrset['ResourceRecords']:
             flags, tag, value = rr['Value'].split()
-            values.append({
-                'flags': flags,
-                'tag': tag,
-                'value': value[1:-1],
-            })
+            values.append({'flags': flags, 'tag': tag, 'value': value[1:-1]})
         return {
             'type': rrset['Type'],
             'values': values,
-            'ttl': int(rrset['TTL'])
+            'ttl': int(rrset['TTL']),
         }
 
     def _data_for_single(self, rrset):
         return {
             'type': rrset['Type'],
             'value': rrset['ResourceRecords'][0]['Value'],
-            'ttl': int(rrset['TTL'])
+            'ttl': int(rrset['TTL']),
         }
 
     _data_for_PTR = _data_for_single
@@ -857,9 +947,11 @@ class Route53Provider(BaseProvider):
     def _data_for_quoted(self, rrset):
         return {
             'type': rrset['Type'],
-            'values': [self._fix_semicolons.sub('\\;', rr['Value'][1:-1])
-                       for rr in rrset['ResourceRecords']],
-            'ttl': int(rrset['TTL'])
+            'values': [
+                self._fix_semicolons.sub('\\;', rr['Value'][1:-1])
+                for rr in rrset['ResourceRecords']
+            ],
+            'ttl': int(rrset['TTL']),
         }
 
     _data_for_TXT = _data_for_quoted
@@ -869,59 +961,61 @@ class Route53Provider(BaseProvider):
         values = []
         for rr in rrset['ResourceRecords']:
             preference, exchange = rr['Value'].split()
-            values.append({
-                'preference': preference,
-                'exchange': exchange,
-            })
+            values.append({'preference': preference, 'exchange': exchange})
         return {
             'type': rrset['Type'],
             'values': values,
-            'ttl': int(rrset['TTL'])
+            'ttl': int(rrset['TTL']),
         }
 
     def _data_for_NAPTR(self, rrset):
         values = []
         for rr in rrset['ResourceRecords']:
-            order, preference, flags, service, regexp, replacement = \
-                rr['Value'].split()
+            order, preference, flags, service, regexp, replacement = rr[
+                'Value'
+            ].split()
             flags = flags[1:-1]
             service = service[1:-1]
             regexp = regexp[1:-1]
-            values.append({
-                'order': order,
-                'preference': preference,
-                'flags': flags,
-                'service': service,
-                'regexp': regexp,
-                'replacement': replacement,
-            })
+            values.append(
+                {
+                    'order': order,
+                    'preference': preference,
+                    'flags': flags,
+                    'service': service,
+                    'regexp': regexp,
+                    'replacement': replacement,
+                }
+            )
         return {
             'type': rrset['Type'],
             'values': values,
-            'ttl': int(rrset['TTL'])
+            'ttl': int(rrset['TTL']),
         }
 
     def _data_for_NS(self, rrset):
         return {
             'type': rrset['Type'],
             'values': [v['Value'] for v in rrset['ResourceRecords']],
-            'ttl': int(rrset['TTL'])
+            'ttl': int(rrset['TTL']),
         }
 
     def _data_for_SRV(self, rrset):
         values = []
         for rr in rrset['ResourceRecords']:
             priority, weight, port, target = rr['Value'].split()
-            values.append({
-                'priority': priority,
-                'weight': weight,
-                'port': port,
-                'target': target,
-            })
+            values.append(
+                {
+                    'priority': priority,
+                    'weight': weight,
+                    'port': port,
+                    'target': target,
+                }
+            )
         return {
             'type': rrset['Type'],
             'values': values,
-            'ttl': int(rrset['TTL'])
+            'ttl': int(rrset['TTL']),
         }
 
     def _load_records(self, zone_id):
@@ -931,9 +1025,9 @@ class Route53Provider(BaseProvider):
             more = True
             start = {}
             while more:
-                resp = \
-                    self._conn.list_resource_record_sets(HostedZoneId=zone_id,
-                                                         **start)
+                resp = self._conn.list_resource_record_sets(
+                    HostedZoneId=zone_id, **start
+                )
                 rrsets += resp['ResourceRecordSets']
                 more = resp['IsTruncated']
                 if more:
@@ -942,8 +1036,9 @@ class Route53Provider(BaseProvider):
                         'StartRecordType': resp['NextRecordType'],
                     }
                     try:
-                        start['StartRecordIdentifier'] = \
-                            resp['NextRecordIdentifier']
+                        start['StartRecordIdentifier'] = resp[
+                            'NextRecordIdentifier'
+                        ]
                     except KeyError:
                         pass
 
@@ -959,12 +1054,7 @@ class Route53Provider(BaseProvider):
         # their final form below
         rules = defaultdict(lambda: {'pool': None, 'geos': []})
         # Base/empty data
-        data = {
-            'dynamic': {
-                'pools': pools,
-                'rules': [],
-            }
-        }
+        data = {'dynamic': {'pools': pools, 'rules': []}}
 
         # For all the rrsets that comprise this dynamic record
         for rrset in rrsets:
@@ -980,8 +1070,9 @@ class Route53Provider(BaseProvider):
                 elif rrset['Failover'] == 'SECONDARY':
                     # This is a failover record, we'll ignore PRIMARY, but
                     # SECONDARY will tell us what the pool's fallback is
-                    fallback_name = \
-                        _parse_pool_name(rrset['AliasTarget']['DNSName'])
+                    fallback_name = _parse_pool_name(
+                        rrset['AliasTarget']['DNSName']
+                    )
                     # Don't care about default fallbacks, anything else
                     # we'll record
                     if fallback_name != 'default':
@@ -1010,8 +1101,10 @@ class Route53Provider(BaseProvider):
                     health_check_id = rrset.get('HealthCheckId', None)
                     health_check = self.health_checks[health_check_id]
                     health_check_config = health_check['HealthCheckConfig']
-                    if health_check_config['Disabled'] and \
-                       health_check_config['Inverted']:
+                    if (
+                        health_check_config['Disabled']
+                        and health_check_config['Inverted']
+                    ):
                         # disabled and inverted means down
                         status = 'down'
                     else:
@@ -1020,18 +1113,18 @@ class Route53Provider(BaseProvider):
                 except KeyError:
                     # No healthcheck means status is up
                     status = 'up'
-                pools[pool_name]['values'].append({
-                    'status': status,
-                    'value': value,
-                    'weight': rrset['Weight'],
-                })
+                pools[pool_name]['values'].append(
+                    {
+                        'status': status,
+                        'value': value,
+                        'weight': rrset['Weight'],
+                    }
+                )
 
         # Convert our map of rules into an ordered list now that we have all
         # the data
         for _, rule in sorted(rules.items()):
-            r = {
-                'pool': rule['pool'],
-            }
+            r = {'pool': rule['pool']}
             geos = sorted(rule['geos'])
             if geos:
                 r['geos'] = geos
@@ -1054,16 +1147,15 @@ class Route53Provider(BaseProvider):
                 name = name[:-zone_name_len]
                 # hosted_zone_id is unused
                 hosted_zone_id = None
-            values.append({
-                'evaluate-target-health': target['EvaluateTargetHealth'],
-                'hosted-zone-id': hosted_zone_id,
-                'name': name,
-                'type': rrset['Type'],
-            })
-        return {
-            'type': Route53AliasRecord._type,
-            'values': values,
-        }
+            values.append(
+                {
+                    'evaluate-target-health': target['EvaluateTargetHealth'],
+                    'hosted-zone-id': hosted_zone_id,
+                    'name': name,
+                    'type': rrset['Type'],
+                }
+            )
+        return {'type': Route53AliasRecord._type, 'values': values}
 
     def _process_desired_zone(self, desired):
         for record in desired.records:
@@ -1076,8 +1168,9 @@ class Route53Provider(BaseProvider):
                     if not geos:
                         rules.append(rule)
                         continue
-                    filtered_geos = [g for g in geos
-                                     if not g.startswith('NA-CA-')]
+                    filtered_geos = [
+                        g for g in geos if not g.startswith('NA-CA-')
+                    ]
                     if not filtered_geos:
                         # We've removed all geos, we'll have to skip this rule
                         msg = f'NA-CA-* not supported for {record.fqdn}'
@@ -1088,8 +1181,10 @@ class Route53Provider(BaseProvider):
                         msg = f'NA-CA-* not supported for {record.fqdn}'
                         before = ', '.join(geos)
                         after = ', '.join(filtered_geos)
-                        fallback = f'filtering rule {i} from ({before}) to ' \
+                        fallback = (
+                            f'filtering rule {i} from ({before}) to '
                             f'({after})'
+                        )
                         self.supports_warn_or_except(msg, fallback)
                         rule.data['geos'] = filtered_geos
                     rules.append(rule)
@@ -1102,8 +1197,12 @@ class Route53Provider(BaseProvider):
         return super(Route53Provider, self)._process_desired_zone(desired)
 
     def populate(self, zone, target=False, lenient=False):
-        self.log.debug('populate: name=%s, target=%s, lenient=%s', zone.name,
-                       target, lenient)
+        self.log.debug(
+            'populate: name=%s, target=%s, lenient=%s',
+            zone.name,
+            target,
+            lenient,
+        )
 
         before = len(zone.records)
         exists = False
@@ -1145,8 +1244,9 @@ class Route53Provider(BaseProvider):
             for name, types in dynamic.items():
                 for _type, rrsets in types.items():
                     data = self._data_for_dynamic(name, _type, rrsets)
-                    record = Record.new(zone, name, data, source=self,
-                                        lenient=lenient)
+                    record = Record.new(
+                        zone, name, data, source=self, lenient=lenient
+                    )
                     zone.add_record(record, lenient=lenient)
 
             # Convert the basic (potentially with geo) rrsets to records
@@ -1165,8 +1265,9 @@ class Route53Provider(BaseProvider):
                         data['geo'] = geo
                     else:
                         data = data[0]
-                    record = Record.new(zone, name, data, source=self,
-                                        lenient=lenient)
+                    record = Record.new(
+                        zone, name, data, source=self, lenient=lenient
+                    )
                     zone.add_record(record, lenient=lenient)
 
             # Route53 Aliases don't have TTLs so we're setting a dummy value
@@ -1179,12 +1280,16 @@ class Route53Provider(BaseProvider):
             for name, rrsets in aliases.items():
                 data = self._data_for_route53_alias(rrsets, zone_name)
                 data['ttl'] = 942942942
-                record = Record.new(zone, name, data, source=self,
-                                    lenient=lenient)
+                record = Record.new(
+                    zone, name, data, source=self, lenient=lenient
+                )
                 zone.add_record(record, lenient=lenient)
 
-        self.log.info('populate:   found %s records, exists=%s',
-                      len(zone.records) - before, exists)
+        self.log.info(
+            'populate:   found %s records, exists=%s',
+            len(zone.records) - before,
+            exists,
+        )
         return exists
 
     def _gen_mods(self, action, records, existing_rrsets):
@@ -1220,39 +1325,55 @@ class Route53Provider(BaseProvider):
         return self._health_checks
 
     def _healthcheck_measure_latency(self, record):
-        return record._octodns.get('route53', {}) \
-            .get('healthcheck', {}) \
+        return (
+            record._octodns.get('route53', {})
+            .get('healthcheck', {})
             .get('measure_latency', True)
+        )
 
     def _healthcheck_request_interval(self, record):
-        interval = record._octodns.get('route53', {}) \
-            .get('healthcheck', {}) \
+        interval = (
+            record._octodns.get('route53', {})
+            .get('healthcheck', {})
             .get('request_interval', 10)
-        if (interval in [10, 30]):
+        )
+        if interval in [10, 30]:
             return interval
         else:
             raise Route53ProviderException(
                 'route53.healthcheck.request_interval '
-                'parameter must be either 10 or 30.')
+                'parameter must be either 10 or 30.'
+            )
 
     def _healthcheck_failure_threshold(self, record):
-        threshold = record._octodns.get('route53', {}) \
-            .get('healthcheck', {}) \
+        threshold = (
+            record._octodns.get('route53', {})
+            .get('healthcheck', {})
             .get('failure_threshold', 6)
-        if (isinstance(threshold, int) and
-                threshold >= 1 and threshold <= 10):
+        )
+        if isinstance(threshold, int) and threshold >= 1 and threshold <= 10:
             return threshold
         else:
             raise Route53ProviderException(
                 'route53.healthcheck.failure_threshold '
                 'parameter must be an integer '
-                'between 1 and 10.')
+                'between 1 and 10.'
+            )
 
-    def _health_check_equivalent(self, host, path, protocol, port,
-                                 measure_latency, request_interval,
-                                 failure_threshold, health_check,
-                                 value=None, disabled=None,
-                                 inverted=None):
+    def _health_check_equivalent(
+        self,
+        host,
+        path,
+        protocol,
+        port,
+        measure_latency,
+        request_interval,
+        failure_threshold,
+        health_check,
+        value=None,
+        disabled=None,
+        inverted=None,
+    ):
         config = health_check['HealthCheckConfig']
 
         # So interestingly Route53 normalizes IPv6 addresses to a funky, but
@@ -1267,18 +1388,22 @@ class Route53Provider(BaseProvider):
             # No value so give this a None to match value's
             config_ip_address = None
 
-        fully_qualified_domain_name = config.get('FullyQualifiedDomainName',
-                                                 None)
+        fully_qualified_domain_name = config.get(
+            'FullyQualifiedDomainName', None
+        )
         resource_path = config.get('ResourcePath', None)
-        return host == fully_qualified_domain_name and \
-            path == resource_path and protocol == config['Type'] and \
-            port == config['Port'] and \
-            measure_latency == config['MeasureLatency'] and \
-            request_interval == config['RequestInterval'] and \
-            failure_threshold == config['FailureThreshold'] and \
-            (disabled is None or disabled == config['Disabled']) and \
-            (inverted is None or inverted == config['Inverted']) and \
-            value == config_ip_address
+        return (
+            host == fully_qualified_domain_name
+            and path == resource_path
+            and protocol == config['Type']
+            and port == config['Port']
+            and measure_latency == config['MeasureLatency']
+            and request_interval == config['RequestInterval']
+            and failure_threshold == config['FailureThreshold']
+            and (disabled is None or disabled == config['Disabled'])
+            and (inverted is None or inverted == config['Inverted'])
+            and value == config_ip_address
+        )
 
     def get_health_check_id(self, record, value, status, create):
         # fqdn & the first value are special, we use them to match up health
@@ -1286,8 +1411,13 @@ class Route53Provider(BaseProvider):
         # we're going to assume that ips are interchangeable to avoid
         # health-checking each one independently
         fqdn = record.fqdn
-        self.log.debug('get_health_check_id: fqdn=%s, type=%s, value=%s, '
-                       'status=%s', fqdn, record._type, value, status)
+        self.log.debug(
+            'get_health_check_id: fqdn=%s, type=%s, value=%s, ' 'status=%s',
+            fqdn,
+            record._type,
+            value,
+            status,
+        )
 
         if status == 'up':
             # status up means no health check
@@ -1319,22 +1449,25 @@ class Route53Provider(BaseProvider):
         # we're looking for a healthcheck with the current version & our record
         # type, we'll ignore anything else
         expected_ref = _healthcheck_ref_prefix(
-            self.HEALTH_CHECK_VERSION, record._type, record.fqdn)
+            self.HEALTH_CHECK_VERSION, record._type, record.fqdn
+        )
         for id, health_check in self.health_checks.items():
             if not health_check['CallerReference'].startswith(expected_ref):
                 # not match, ignore
                 continue
-            if self._health_check_equivalent(healthcheck_host,
-                                             healthcheck_path,
-                                             healthcheck_protocol,
-                                             healthcheck_port,
-                                             healthcheck_latency,
-                                             healthcheck_interval,
-                                             healthcheck_threshold,
-                                             health_check,
-                                             value=value,
-                                             disabled=healthcheck_disabled,
-                                             inverted=healthcheck_inverted):
+            if self._health_check_equivalent(
+                healthcheck_host,
+                healthcheck_path,
+                healthcheck_protocol,
+                healthcheck_port,
+                healthcheck_latency,
+                healthcheck_interval,
+                healthcheck_threshold,
+                health_check,
+                value=value,
+                disabled=healthcheck_disabled,
+                inverted=healthcheck_inverted,
+            ):
                 # this is the health check we're looking for
                 self.log.debug('get_health_check_id:   found match id=%s', id)
                 return id
@@ -1362,37 +1495,42 @@ class Route53Provider(BaseProvider):
             config['IPAddress'] = value
 
         expected_ref = _healthcheck_ref_prefix(
-            self.HEALTH_CHECK_VERSION, record._type, record.fqdn)
-        ref = f'{expected_ref}:' + \
-            uuid4().hex[:12]
-        resp = self._conn.create_health_check(CallerReference=ref,
-                                              HealthCheckConfig=config)
+            self.HEALTH_CHECK_VERSION, record._type, record.fqdn
+        )
+        ref = f'{expected_ref}:' + uuid4().hex[:12]
+        resp = self._conn.create_health_check(
+            CallerReference=ref, HealthCheckConfig=config
+        )
         health_check = resp['HealthCheck']
         id = health_check['Id']
 
         # Set a Name for the benefit of the UI
         value_or_host = value or healthcheck_host
         name = f'{record.fqdn}:{record._type} - {value_or_host}'
-        self._conn.change_tags_for_resource(ResourceType='healthcheck',
-                                            ResourceId=id,
-                                            AddTags=[{
-                                                'Key': 'Name',
-                                                'Value': name,
-                                            }])
+        self._conn.change_tags_for_resource(
+            ResourceType='healthcheck',
+            ResourceId=id,
+            AddTags=[{'Key': 'Name', 'Value': name}],
+        )
         # Manually add it to our cache
-        health_check['Tags'] = {
-            'Name': name
-        }
+        health_check['Tags'] = {'Name': name}
 
         # store the new health check so that we'll be able to find it in the
         # future
         self._health_checks[id] = health_check
-        self.log.info('get_health_check_id: created id=%s, host=%s, '
-                      'path=%s, protocol=%s, port=%d, measure_latency=%r, '
-                      'request_interval=%d, value=%s',
-                      id, healthcheck_host, healthcheck_path,
-                      healthcheck_protocol, healthcheck_port,
-                      healthcheck_latency, healthcheck_interval, value)
+        self.log.info(
+            'get_health_check_id: created id=%s, host=%s, '
+            'path=%s, protocol=%s, port=%d, measure_latency=%r, '
+            'request_interval=%d, value=%s',
+            id,
+            healthcheck_host,
+            healthcheck_path,
+            healthcheck_protocol,
+            healthcheck_port,
+            healthcheck_latency,
+            healthcheck_interval,
+            value,
+        )
         return id
 
     def _gc_health_checks(self, record, new):
@@ -1424,8 +1562,9 @@ class Route53Provider(BaseProvider):
             elif ref.startswith(expected_legacy):
                 config = health_check['HealthCheckConfig']
                 if expected_legacy_host == config['FullyQualifiedDomainName']:
-                    self.log.info('_gc_health_checks:   deleting legacy id=%s',
-                                  id)
+                    self.log.info(
+                        '_gc_health_checks:   deleting legacy id=%s', id
+                    )
                     self._conn.delete_health_check(HealthCheckId=id)
 
     def _gen_records(self, record, zone_id, creating=False):
@@ -1445,8 +1584,9 @@ class Route53Provider(BaseProvider):
     def _mod_Update(self, change, zone_id, existing_rrsets):
         # See comments in _Route53Record for how the set math is made to do our
         # bidding here.
-        existing_records = self._gen_records(change.existing, zone_id,
-                                             creating=False)
+        existing_records = self._gen_records(
+            change.existing, zone_id, creating=False
+        )
         new_records = self._gen_records(change.new, zone_id, creating=True)
         # Now is a good time to clear out any unused health checks since we
         # know what we'll be using going forward
@@ -1465,14 +1605,17 @@ class Route53Provider(BaseProvider):
             if new_record in existing_records:
                 upserts.add(new_record)
 
-        return self._gen_mods('DELETE', deletes, existing_rrsets) + \
-            self._gen_mods('CREATE', creates, existing_rrsets) + \
-            self._gen_mods('UPSERT', upserts, existing_rrsets)
+        return (
+            self._gen_mods('DELETE', deletes, existing_rrsets)
+            + self._gen_mods('CREATE', creates, existing_rrsets)
+            + self._gen_mods('UPSERT', upserts, existing_rrsets)
+        )
 
     def _mod_Delete(self, change, zone_id, existing_rrsets):
         # Existing is the thing that needs to be deleted
-        existing_records = self._gen_records(change.existing, zone_id,
-                                             creating=False)
+        existing_records = self._gen_records(
+            change.existing, zone_id, creating=False
+        )
         # Now is a good time to clear out all the health checks since we know
         # we're done with them
         self._gc_health_checks(change.existing, [])
@@ -1496,9 +1639,12 @@ class Route53Provider(BaseProvider):
         status = statuses.get(value, 'obey')
         if status == 'up':
             if 'HealthCheckId' in rrset:
-                self.log.info('_extra_changes_update_needed: health-check '
-                              'found for status="up", causing update of %s:%s',
-                              record.fqdn, record._type)
+                self.log.info(
+                    '_extra_changes_update_needed: health-check '
+                    'found for status="up", causing update of %s:%s',
+                    record.fqdn,
+                    record._type,
+                )
                 return True
             else:
                 # No health check needed
@@ -1509,14 +1655,16 @@ class Route53Provider(BaseProvider):
             health_check = self.health_checks[health_check_id]
             caller_ref = health_check['CallerReference']
             if caller_ref.startswith(self.HEALTH_CHECK_VERSION):
-                if self._health_check_equivalent(healthcheck_host,
-                                                 healthcheck_path,
-                                                 healthcheck_protocol,
-                                                 healthcheck_port,
-                                                 healthcheck_latency,
-                                                 healthcheck_interval,
-                                                 healthcheck_threshold,
-                                                 health_check):
+                if self._health_check_equivalent(
+                    healthcheck_host,
+                    healthcheck_path,
+                    healthcheck_protocol,
+                    healthcheck_port,
+                    healthcheck_latency,
+                    healthcheck_interval,
+                    healthcheck_threshold,
+                    health_check,
+                ):
                     # it has the right health check
                     return False
         except (IndexError, KeyError):
@@ -1524,28 +1672,42 @@ class Route53Provider(BaseProvider):
             pass
 
         # no good, doesn't have the right health check, needs an update
-        self.log.info('_extra_changes_update_needed: health-check caused '
-                      'update of %s:%s', record.fqdn, record._type)
+        self.log.info(
+            '_extra_changes_update_needed: health-check caused '
+            'update of %s:%s',
+            record.fqdn,
+            record._type,
+        )
         return True
 
     def _extra_changes_geo_needs_update(self, zone_id, record):
         # OK this is a record we don't have change for that does have geo
         # information. We need to look and see if it needs to be updated b/c of
         # a health check version bump or other mismatch
-        self.log.debug('_extra_changes_geo_needs_update: inspecting=%s, %s',
-                       record.fqdn, record._type)
+        self.log.debug(
+            '_extra_changes_geo_needs_update: inspecting=%s, %s',
+            record.fqdn,
+            record._type,
+        )
 
         fqdn = record.fqdn
 
         # loop through all the r53 rrsets
         for rrset in self._load_records(zone_id):
-            if fqdn == rrset['Name'] and record._type == rrset['Type'] and \
-               rrset.get('GeoLocation', {}).get('CountryCode', False) != '*' \
-               and self._extra_changes_update_needed(record, rrset):
+            if (
+                fqdn == rrset['Name']
+                and record._type == rrset['Type']
+                and rrset.get('GeoLocation', {}).get('CountryCode', False)
+                != '*'
+                and self._extra_changes_update_needed(record, rrset)
+            ):
                 # no good, doesn't have the right health check, needs an update
-                self.log.info('_extra_changes_geo_needs_update: health-check '
-                              'caused update of %s:%s', record.fqdn,
-                              record._type)
+                self.log.info(
+                    '_extra_changes_geo_needs_update: health-check '
+                    'caused update of %s:%s',
+                    record.fqdn,
+                    record._type,
+                )
                 return True
 
         return False
@@ -1554,8 +1716,11 @@ class Route53Provider(BaseProvider):
         # OK this is a record we don't have change for that does have dynamic
         # information. We need to look and see if it needs to be updated b/c of
         # a health check version bump or other mismatch
-        self.log.debug('_extra_changes_dynamic_needs_update: inspecting=%s, '
-                       '%s', record.fqdn, record._type)
+        self.log.debug(
+            '_extra_changes_dynamic_needs_update: inspecting=%s, ' '%s',
+            record.fqdn,
+            record._type,
+        )
 
         fqdn = record.fqdn
         _type = record._type
@@ -1573,9 +1738,11 @@ class Route53Provider(BaseProvider):
             # this is an rrset we're interested in.
             maybe_meta, rest = name.split('.', 1)
 
-            if not maybe_meta.startswith('_octodns-') or \
-               not maybe_meta.endswith('-value') or \
-               '-default-' in name:
+            if (
+                not maybe_meta.startswith('_octodns-')
+                or not maybe_meta.endswith('-value')
+                or '-default-' in name
+            ):
                 # We're only interested in non-default dynamic value records,
                 # as that's where healthchecks live
                 continue
@@ -1586,9 +1753,12 @@ class Route53Provider(BaseProvider):
 
             if self._extra_changes_update_needed(record, rrset, statuses):
                 # no good, doesn't have the right health check, needs an update
-                self.log.info('_extra_changes_dynamic_needs_update: '
-                              'health-check caused update of %s:%s',
-                              record.fqdn, record._type)
+                self.log.info(
+                    '_extra_changes_dynamic_needs_update: '
+                    'health-check caused update of %s:%s',
+                    record.fqdn,
+                    record._type,
+                )
                 return True
 
         return False
@@ -1619,15 +1789,18 @@ class Route53Provider(BaseProvider):
         return extras
 
     def _include_change(self, change):
-        return not (isinstance(change, Update) and
-                    change.new._type == Route53AliasRecord._type and
-                    change.new.values == change.existing.values)
+        return not (
+            isinstance(change, Update)
+            and change.new._type == Route53AliasRecord._type
+            and change.new.values == change.existing.values
+        )
 
     def _apply(self, plan):
         desired = plan.desired
         changes = plan.changes
-        self.log.info('_apply: zone=%s, len(changes)=%d', desired.name,
-                      len(changes))
+        self.log.info(
+            '_apply: zone=%s, len(changes)=%d', desired.name, len(changes)
+        )
 
         batch = []
         batch_rs_count = 0
@@ -1650,8 +1823,10 @@ class Route53Provider(BaseProvider):
             mods.sort(key=_mod_keyer)
 
             mods_rs_count = sum(
-                [len(m['ResourceRecordSet'].get('ResourceRecords', ''))
-                 for m in mods]
+                [
+                    len(m['ResourceRecordSet'].get('ResourceRecords', ''))
+                    for m in mods
+                ]
             )
 
             if mods_rs_count > self.max_changes:
@@ -1664,9 +1839,12 @@ class Route53Provider(BaseProvider):
                 batch += mods
                 batch_rs_count += mods_rs_count
             else:
-                self.log.info('_apply:   sending change request for batch of '
-                              '%d mods, %d ResourceRecords', len(batch),
-                              batch_rs_count)
+                self.log.info(
+                    '_apply:   sending change request for batch of '
+                    '%d mods, %d ResourceRecords',
+                    len(batch),
+                    batch_rs_count,
+                )
                 # send the batch
                 self._really_apply(batch, zone_id)
                 # start a new batch with the leftovers
@@ -1677,21 +1855,24 @@ class Route53Provider(BaseProvider):
         # over in batch to process. In the case that we submit a batch up there
         # it was always the case that there was something pushing us over
         # max_changes and thus left over to submit.
-        self.log.info('_apply:   sending change request for batch of %d mods,'
-                      ' %d ResourceRecords', len(batch),
-                      batch_rs_count)
+        self.log.info(
+            '_apply:   sending change request for batch of %d mods,'
+            ' %d ResourceRecords',
+            len(batch),
+            batch_rs_count,
+        )
         self._really_apply(batch, zone_id)
 
     def _really_apply(self, batch, zone_id):
         # Ensure this batch is ordered (deletes before creates etc.)
         batch.sort(key=_mod_keyer)
         uuid = uuid4().hex
-        batch = {
-            'Comment': f'Change: {uuid}',
-            'Changes': batch,
-        }
-        self.log.debug('_really_apply:   sending change request, comment=%s',
-                       batch['Comment'])
+        batch = {'Comment': f'Change: {uuid}', 'Changes': batch}
+        self.log.debug(
+            '_really_apply:   sending change request, comment=%s',
+            batch['Comment'],
+        )
         resp = self._conn.change_resource_record_sets(
-            HostedZoneId=zone_id, ChangeBatch=batch)
+            HostedZoneId=zone_id, ChangeBatch=batch
+        )
         self.log.debug('_really_apply:   change info=%s', resp['ChangeInfo'])
