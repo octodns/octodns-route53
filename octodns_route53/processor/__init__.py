@@ -13,9 +13,11 @@ class AwsAcmMangingProcessor(BaseProcessor):
 
     def _ignore_awsacm_cnames(self, zone):
         for r in zone.records:
-            if r._type == 'CNAME' and \
-                r.name.startswith('_') \
-                    and r.value.endswith('.acm-validations.aws.'):
+            if (
+                r._type == 'CNAME'
+                and r.name.startswith('_')
+                and r.value.endswith('.acm-validations.aws.')
+            ):
                 self.log.info('_process: ignoring %s', r.fqdn)
                 zone.remove_record(r)
         return zone
