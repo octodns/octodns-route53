@@ -20,7 +20,7 @@ from octodns.provider.base import BaseProvider
 
 from .record import Route53AliasRecord
 
-__VERSION__ = '0.0.4'
+__VERSION__ = '0.0.5'
 
 octal_re = re.compile(r'\\(\d\d\d)')
 
