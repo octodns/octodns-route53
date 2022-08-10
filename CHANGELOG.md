@@ -1,3 +1,8 @@
+## v0.0.6 - 2022-??-?? -
+
+* Internationalizing Domain Names in Applications (IDNA) support for zone and
+  record names (record values and advanced records are not yet supported)
+
 ## v0.0.5 - 2022-07-14 - Support the root
 
 * Enable SUPPORTS_ROOT_NS for management of root NS records. Requires

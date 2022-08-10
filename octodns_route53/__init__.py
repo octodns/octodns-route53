@@ -13,6 +13,7 @@ import re
 import hashlib
 
 from octodns.equality import EqualityTupleMixin
+from octodns.idna import idna_decode, idna_encode
 from octodns.record import Create, Record, Update
 from octodns.record.geo import GeoCodes
 from octodns.provider import ProviderException
@@ -225,11 +226,11 @@ class _Route53Record(EqualityTupleMixin):
         return self._values
 
     def mod(self, action, existing_rrsets):
-
+        name = idna_encode(self.fqdn)
         return {
             'Action': action,
             'ResourceRecordSet': {
-                'Name': self.fqdn,
+                'Name': name,
                 'ResourceRecords': [{'Value': v} for v in self.values],
                 'TTL': self.ttl,
                 'Type': self._type,
@@ -349,7 +350,7 @@ class _Route53Alias(_Route53Record):
                     'EvaluateTargetHealth': self.evaluate_target_health,
                     'HostedZoneId': self.hosted_zone_id,
                 },
-                'Name': self.fqdn,
+                'Name': idna_encode(self.fqdn),
                 'Type': self.target_type,
             },
         }
@@ -405,12 +406,12 @@ class _Route53DynamicPool(_Route53Record):
             'Action': action,
             'ResourceRecordSet': {
                 'AliasTarget': {
-                    'DNSName': self.target_dns_name,
+                    'DNSName': idna_encode(self.target_dns_name),
                     'EvaluateTargetHealth': True,
                     'HostedZoneId': self.hosted_zone_id,
                 },
                 'Failover': 'SECONDARY' if self.target_name else 'PRIMARY',
-                'Name': self.fqdn,
+                'Name': idna_encode(self.fqdn),
                 'SetIdentifier': self.identifer,
                 'Type': self._type,
             },
@@ -453,12 +454,12 @@ class _Route53DynamicRule(_Route53Record):
     def mod(self, action, existing_rrsets):
         rrset = {
             'AliasTarget': {
-                'DNSName': self.target_dns_name,
+                'DNSName': idna_encode(self.target_dns_name),
                 'EvaluateTargetHealth': True,
                 'HostedZoneId': self.hosted_zone_id,
             },
             'GeoLocation': {'CountryCode': '*'},
-            'Name': self.fqdn,
+            'Name': idna_encode(self.fqdn),
             'SetIdentifier': self.identifer,
             'Type': self._type,
         }
@@ -536,7 +537,7 @@ class _Route53DynamicValue(_Route53Record):
         ret = {
             'Action': action,
             'ResourceRecordSet': {
-                'Name': self.fqdn,
+                'Name': idna_encode(self.fqdn),
                 'ResourceRecords': [{'Value': self.value}],
                 'SetIdentifier': self.identifer,
                 'TTL': self.ttl,
@@ -565,7 +566,7 @@ class _Route53GeoDefault(_Route53Record):
         return {
             'Action': action,
             'ResourceRecordSet': {
-                'Name': self.fqdn,
+                'Name': idna_encode(self.fqdn),
                 'GeoLocation': {'CountryCode': '*'},
                 'ResourceRecords': [{'Value': v} for v in self.values],
                 'SetIdentifier': 'default',
@@ -611,7 +612,7 @@ class _Route53GeoRecord(_Route53Record):
                     return {'Action': action, 'ResourceRecordSet': existing}
 
         rrset = {
-            'Name': self.fqdn,
+            'Name': idna_encode(self.fqdn),
             'GeoLocation': {'CountryCode': '*'},
             'ResourceRecords': [{'Value': v} for v in geo.values],
             'SetIdentifier': set_identifier,
@@ -831,7 +832,9 @@ class Route53Provider(BaseProvider):
         # attempt to get zone by name
         # limited to one as this should be unique
         id = None
-        resp = self._conn.list_hosted_zones_by_name(DNSName=name, MaxItems="1")
+        resp = self._conn.list_hosted_zones_by_name(
+            DNSName=idna_encode(name), MaxItems="1"
+        )
         if len(resp['HostedZones']) != 0:
             # if there is a response that starts with the name
             if resp['HostedZones'][0]['Name'].startswith(name):
@@ -854,7 +857,8 @@ class Route53Provider(BaseProvider):
                 while more:
                     resp = self._conn.list_hosted_zones(**start)
                     for z in resp['HostedZones']:
-                        zones[z['Name']] = z['Id']
+                        name = idna_decode(z['Name'])
+                        zones[name] = z['Id']
                     more = resp['IsTruncated']
                     start['Marker'] = resp.get('NextMarker', None)
                 self._r53_zones = zones
@@ -878,11 +882,13 @@ class Route53Provider(BaseProvider):
             )
             if del_set:
                 resp = self._conn.create_hosted_zone(
-                    Name=name, CallerReference=ref, DelegationSetId=del_set
+                    Name=idna_encode(name),
+                    CallerReference=ref,
+                    DelegationSetId=del_set,
                 )
             else:
                 resp = self._conn.create_hosted_zone(
-                    Name=name, CallerReference=ref
+                    Name=idna_encode(name), CallerReference=ref
                 )
             self._r53_zones[name] = id = resp['HostedZone']['Id']
         return id
@@ -1215,7 +1221,9 @@ class Route53Provider(BaseProvider):
             aliases = defaultdict(list)
 
             for rrset in self._load_records(zone_id):
-                record_name = zone.hostname_from_fqdn(rrset['Name'])
+                record_name = rrset['Name'].replace('\\052', '*')
+                record_name = idna_decode(record_name)
+                record_name = zone.hostname_from_fqdn(record_name)
                 record_name = _octal_replace(record_name)
                 record_type = rrset['Type']
                 if record_type not in self.SUPPORTS:
