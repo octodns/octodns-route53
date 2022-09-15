@@ -10,20 +10,19 @@ from unittest.mock import patch
 from octodns.record import Create, Delete, Record, Update
 from octodns.zone import Zone
 
-from octodns_route53 import (
-    Route53Provider,
+from octodns_route53 import Route53Provider, Route53ProviderException
+from octodns_route53.record import _Route53AliasValue, Route53AliasRecord
+from octodns_route53.processor import AwsAcmMangingProcessor
+from octodns_route53.provider import (
     _Route53Alias,
     _Route53DynamicValue,
     _Route53GeoDefault,
     _Route53GeoRecord,
-    Route53ProviderException,
     _Route53Record,
     _mod_keyer,
     _octal_replace,
     _healthcheck_ref_prefix,
 )
-from octodns_route53.record import _Route53AliasValue, Route53AliasRecord
-from octodns_route53.processor import AwsAcmMangingProcessor
 
 
 class GeoProvider(object):
