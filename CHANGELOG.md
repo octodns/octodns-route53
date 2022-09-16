@@ -1,3 +1,7 @@
+## v0.0.6 - 2022-??-?? -
+
+* ElbSource added to support dynamically creating records for ELBs
+
 ## v0.0.5 - 2022-07-14 - Support the root
 
 * Enable SUPPORTS_ROOT_NS for management of root NS records. Requires

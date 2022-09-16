@@ -2,8 +2,6 @@
 #
 #
 
-from boto3 import client
-from botocore.config import Config
 from collections import defaultdict
 from ipaddress import AddressValueError, ip_address
 from pycountry_convert import country_alpha2_to_continent_code
@@ -18,6 +16,7 @@ from octodns.record.geo import GeoCodes
 from octodns.provider import ProviderException
 from octodns.provider.base import BaseProvider
 
+from .auth import _AuthMixin
 from .record import Route53AliasRecord
 
 octal_re = re.compile(r'\\(\d\d\d)')
@@ -724,12 +723,12 @@ def _parse_pool_name(n):
     return n.split('.', 1)[0][9:-5]
 
 
-class Route53Provider(BaseProvider):
+class Route53Provider(_AuthMixin, BaseProvider):
     '''
     AWS Route53 Provider
 
     route53:
-        class: octodns.provider.route53.Route53Provider
+        class: octodns_route53.Route53Provider
         # The AWS access key id
         access_key_id:
         # The AWS secret access key
@@ -786,38 +785,25 @@ class Route53Provider(BaseProvider):
         self.max_changes = max_changes
         self.delegation_set_id = delegation_set_id
         self.get_zones_by_name = get_zones_by_name
-        _msg = (
-            f'access_key_id={access_key_id}, secret_access_key=***, '
-            'session_token=***'
-        )
-        use_fallback_auth = (
-            access_key_id is None
-            and secret_access_key is None
-            and session_token is None
-        )
-        if use_fallback_auth:
-            _msg = 'auth=fallback'
+
         self.log = logging.getLogger(f'Route53Provider[{id}]')
-        self.log.debug('__init__: id=%s, %s', id, _msg)
+        self.log.info(
+            '__init__: id=%s, access_key_id=%s, max_changes=%d, delegation_set_id=%s, get_zones_by_name=%s',
+            id,
+            access_key_id,
+            max_changes,
+            delegation_set_id,
+            get_zones_by_name,
+        )
         super().__init__(id, *args, **kwargs)
 
-        config = None
-        if client_max_attempts is not None:
-            self.log.info(
-                '__init__: setting max_attempts to %d', client_max_attempts
-            )
-            config = Config(retries={'max_attempts': client_max_attempts})
-
-        if use_fallback_auth:
-            self._conn = client('route53', config=config)
-        else:
-            self._conn = client(
-                'route53',
-                aws_access_key_id=access_key_id,
-                aws_secret_access_key=secret_access_key,
-                aws_session_token=session_token,
-                config=config,
-            )
+        self._conn = self.client(
+            service_name='route53',
+            access_key_id=access_key_id,
+            secret_access_key=secret_access_key,
+            session_token=session_token,
+            client_max_attempts=client_max_attempts,
+        )
 
         self._r53_zones = None
         self._r53_rrsets = {}
