@@ -1,9 +1,17 @@
 ## v0.0.5 - 2022-07-14 - Support the root
 
+### Important
+
+* Add support for Route53Provider/ALIAS provider-specific type, see README for
+  more information. octoDNS will now see and try to manage existing Route53
+  ALIAS records. See https://github.com/octodns/octodns-route53/issues/34#issuecomment-1228568776
+  for more details on what this means and how to add them to your configs or
+  ignore them.
+
+### Misc
+
 * Enable SUPPORTS_ROOT_NS for management of root NS records. Requires
   octodns>=0.9.16.
-* Add support for Route53Provider/ALIAS provider-specific type, see README for
-  more information.
 * Health checks ref's use a hash when ref > 64 chars, to support long fqdns.
 * Add support for FailureThreashold in healthchecks
 * Make sure health checks get deleted from CNAME records
