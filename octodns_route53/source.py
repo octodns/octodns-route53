@@ -123,18 +123,15 @@ class Ec2Source(_AuthMixin, BaseSource):
                 # not interested in this one
                 continue
 
-            print(instance)
             private_v4 = instance['private_v4']
             if not private_v4:
                 # not interested in this one
-                print('  no private')
                 continue
 
             rev = IPv4Address(private_v4).reverse_pointer
             rev = f'{rev}.'
             if not rev.endswith(zone.name):
                 # not interested in this one
-                print(f'  not a match {rev}')
                 continue
 
             rev = zone.hostname_from_fqdn(rev)
@@ -258,13 +255,8 @@ class ElbSource(_AuthMixin, BaseSource):
             for lb in resp['LoadBalancers']:
                 arn = lb['LoadBalancerArn']
                 lbs[arn] = {
-                    'arn': arn,
                     'dns_name': f'{lb["DNSName"]}.',
-                    'fqdns': [],
-                    'ip_address_type': lb['IpAddressType'],
-                    'name': lb['LoadBalancerName'],
-                    'scheme': lb['Scheme'],
-                    'type': lb['Type'],
+                    'fqdns': [lb['LoadBalancerName']],
                 }
 
             # request tags and look through them for fqdns
@@ -274,13 +266,19 @@ class ElbSource(_AuthMixin, BaseSource):
                 for td in resp['TagDescriptions']:
                     arn = td['ResourceArn']
                     lb = lbs[arn]
-                    for tag in td['Tags']:
+                    for tag in td.get('Tags', []):
                         key = tag['Key']
                         val = tag['Value']
                         if key.startswith(self.tag_prefix):
                             lb['fqdns'].extend(val.split('/'))
 
-            self._lbs = lbs
+            for lb in lbs.values():
+                fqdns = lb['fqdns']
+                fqdns = [f'{i}.' if i[-1] != '.' else i for i in fqdns]
+                lb['fqdns'] = fqdns
+
+            # add .'s to fqdns that don't have them
+            self._lbs = lbs.values()
 
         return self._lbs
 
@@ -288,7 +286,7 @@ class ElbSource(_AuthMixin, BaseSource):
         self.log.debug('populate: zone=%s', zone.name)
         before = len(zone.records)
 
-        for lb in self.lbs.values():
+        for lb in self.lbs:
             for fqdn in lb['fqdns']:
                 fqdn = idna_encode(fqdn)
                 if fqdn == zone.name:
