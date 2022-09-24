@@ -2,6 +2,7 @@
 #
 #
 
+from ipaddress import IPv4Address
 from logging import getLogger
 
 from octodns.idna import idna_encode
@@ -9,6 +10,154 @@ from octodns.source.base import BaseSource
 from octodns.record import Record
 
 from .auth import _AuthMixin
+
+
+class Ec2Source(_AuthMixin, BaseSource):
+    SUPPORTS_GEO = False
+    SUPPORTS = ('A', 'AAAA', 'PTR')
+
+    def __init__(
+        self,
+        id,
+        region,
+        access_key_id=None,
+        secret_access_key=None,
+        session_token=None,
+        client_max_attempts=None,
+        ttl=3600,
+        tag_prefix='octodns',
+        *args,
+        **kwargs,
+    ):
+        self.log = getLogger(f'Ec2Source[{id}]')
+        self.log.info(
+            '__init__: id=%s, region=%s, access_key_id=%s, ttl=%d, tag_prefix=%s',
+            id,
+            region,
+            access_key_id,
+            ttl,
+            tag_prefix,
+        )
+        self.ttl = ttl
+        self.tag_prefix = tag_prefix
+
+        super().__init__(id, *args, **kwargs)
+
+        self._conn = self.client(
+            service_name='ec2',
+            access_key_id=access_key_id,
+            secret_access_key=secret_access_key,
+            session_token=session_token,
+            client_max_attempts=client_max_attempts,
+            region_name=region,
+        )
+
+        self._instances = None
+
+    @property
+    def instances(self):
+        if self._instances is None:
+            resp = self._conn.describe_instances()
+            instances = {}
+            for reservation in resp['Reservations']:
+                for instance in reservation['Instances']:
+                    # process tags
+                    fqdns = []
+                    for tag in instance.get('Tags', []):
+                        key = tag['Key']
+                        val = tag['Value']
+                        if key == 'Name':
+                            fqdns.append(val)
+                        elif key.startswith(self.tag_prefix):
+                            fqdns.extend(val.split('/'))
+
+                    fqdns = [f'{i}.' if i[-1] != '.' else i for i in fqdns]
+                    instances[instance['InstanceId']] = {
+                        'private_v4': instance.get('PrivateIpAddress'),
+                        'public_v4': instance.get('PublicIpAddress'),
+                        'v6': instance.get('Ipv6Address'),
+                        'fqdns': fqdns,
+                    }
+
+            # so to get a determinate order, then discard the key
+            instances = [i[1] for i in sorted(instances.items())]
+            self._instances = instances
+
+        return self._instances
+
+    def _populate(self, zone):
+        for instance in self.instances:
+            for fqdn in instance['fqdns']:
+                if not fqdn.endswith(zone.name):
+                    # not interested in this one
+                    continue
+
+                name = zone.hostname_from_fqdn(fqdn)
+                if instance['private_v4']:
+                    a = Record.new(
+                        zone,
+                        name,
+                        {
+                            'type': 'A',
+                            'ttl': self.ttl,
+                            'value': instance['private_v4'],
+                        },
+                    )
+                    zone.add_record(a)
+
+                if instance['v6']:
+                    aaaa = Record.new(
+                        zone,
+                        name,
+                        {
+                            'type': 'AAAA',
+                            'ttl': self.ttl,
+                            'value': instance['v6'],
+                        },
+                    )
+                    zone.add_record(aaaa)
+
+    def _populate_in_addr_arpa(self, zone):
+        for instance in self.instances:
+            if not instance['fqdns']:
+                # not interested in this one
+                continue
+
+            print(instance)
+            private_v4 = instance['private_v4']
+            if not private_v4:
+                # not interested in this one
+                print('  no private')
+                continue
+
+            rev = IPv4Address(private_v4).reverse_pointer
+            rev = f'{rev}.'
+            if not rev.endswith(zone.name):
+                # not interested in this one
+                print(f'  not a match {rev}')
+                continue
+
+            rev = zone.hostname_from_fqdn(rev)
+            ptr = Record.new(
+                zone,
+                rev,
+                {'type': 'PTR', 'ttl': self.ttl, 'values': instance['fqdns']},
+            )
+            zone.add_record(ptr)
+
+    def populate(self, zone, target=False, lenient=False):
+        self.log.debug('populate: zone=%s', zone.name)
+        before = len(zone.records)
+
+        # TODO: ip6.arpa. support
+        if zone.name.endswith('in-addr.arpa.'):
+            self._populate_in_addr_arpa(zone)
+        else:
+            self._populate(zone)
+
+        self.log.info(
+            'populate:   found %s records', len(zone.records) - before
+        )
 
 
 class ElbSource(_AuthMixin, BaseSource):
@@ -115,11 +264,10 @@ class ElbSource(_AuthMixin, BaseSource):
                     'ip_address_type': lb['IpAddressType'],
                     'name': lb['LoadBalancerName'],
                     'scheme': lb['Scheme'],
-                    'tags': {},
                     'type': lb['Type'],
                 }
 
-            # get and add all of their tags
+            # request tags and look through them for fqdns
             arns = list(lbs.keys())
             if arns:
                 resp = self._conn.describe_tags(ResourceArns=arns)
@@ -129,7 +277,6 @@ class ElbSource(_AuthMixin, BaseSource):
                     for tag in td['Tags']:
                         key = tag['Key']
                         val = tag['Value']
-                        lb['tags'][key] = val
                         if key.startswith(self.tag_prefix):
                             lb['fqdns'].extend(val.split('/'))
 
