@@ -105,6 +105,7 @@ When a zone is being populated any fqdns matching the zone name will result in r
 
 #### Example Tags for EC2/ELB
 
+```yaml
 # This will result in an ALIAS record for example.com. -> DNSName
 octodns: example.com.
 
@@ -120,6 +121,7 @@ octodns: foo.example.com./bar.other.com.
 # acceptable to add multiple tags rather than separating things with `/`
 octodns-1: foo.example.com.
 octodns-2: bar.other.com.
+```
 
 #### Processors
 
