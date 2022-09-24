@@ -2,7 +2,7 @@
 #
 #
 
-from ipaddress import IPv4Address
+from ipaddress import IPv4Address, IPv6Address
 from logging import getLogger
 
 from octodns.idna import idna_encode
@@ -74,7 +74,6 @@ class Ec2Source(_AuthMixin, BaseSource):
                     fqdns = [f'{i}.' if i[-1] != '.' else i for i in fqdns]
                     instances[instance['InstanceId']] = {
                         'private_v4': instance.get('PrivateIpAddress'),
-                        'public_v4': instance.get('PublicIpAddress'),
                         'v6': instance.get('Ipv6Address'),
                         'fqdns': fqdns,
                     }
@@ -142,13 +141,39 @@ class Ec2Source(_AuthMixin, BaseSource):
             )
             zone.add_record(ptr)
 
+    def _populate_ip6_arpa(self, zone):
+        for instance in self.instances:
+            if not instance['fqdns']:
+                # not interested in this one
+                continue
+
+            v6 = instance['v6']
+            if not v6:
+                # not interested in this one
+                continue
+
+            rev = IPv6Address(v6).reverse_pointer
+            rev = f'{rev}.'
+            if not rev.endswith(zone.name):
+                # not interested in this one
+                continue
+
+            rev = zone.hostname_from_fqdn(rev)
+            ptr = Record.new(
+                zone,
+                rev,
+                {'type': 'PTR', 'ttl': self.ttl, 'values': instance['fqdns']},
+            )
+            zone.add_record(ptr)
+
     def populate(self, zone, target=False, lenient=False):
         self.log.debug('populate: zone=%s', zone.name)
         before = len(zone.records)
 
-        # TODO: ip6.arpa. support
         if zone.name.endswith('in-addr.arpa.'):
             self._populate_in_addr_arpa(zone)
+        elif zone.name.endswith('ip6.arpa.'):
+            self._populate_ip6_arpa(zone)
         else:
             self._populate(zone)
 

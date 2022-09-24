@@ -76,7 +76,7 @@ class TestEc2Source(TestCase):
                     'InstanceId': 'a47',
                     'PrivateIpAddress': '10.0.1.17',
                     'PublicIpAddress': '44.200.16.240',
-                    'Ipv6Address': 'fc00::3',
+                    'Ipv6Address': 'ab00::3',
                     'Tags': [{'Key': 'Name', 'Value': 'v6.other.zone.'}],
                 },
                 {
@@ -103,20 +103,24 @@ class TestEc2Source(TestCase):
         source, stubber = self._get_stubbed_source()
 
         zone = Zone('unit.tests.', [])
-        arpa = Zone('0.0.10.in-addr.arpa.', [])
+        in_addr_arpa = Zone('0.0.10.in-addr.arpa.', [])
+        ip6_arpa = Zone('0.0.0.0.fc00.in-addr.arpa.', [])
 
         # no reservations
         stubber.add_response('describe_instances', {'Reservations': []})
         source.populate(zone)
         self.assertEqual(0, len(zone.records))
-        source.populate(arpa)
-        self.assertEqual(0, len(arpa.records))
+        source.populate(in_addr_arpa)
+        self.assertEqual(0, len(in_addr_arpa.records))
+        source.populate(ip6_arpa)
+        self.assertEqual(0, len(ip6_arpa.records))
 
     def test_no_instances(self):
         source, stubber = self._get_stubbed_source()
 
         zone = Zone('unit.tests.', [])
-        arpa = Zone('0.0.10.in-addr.arpa.', [])
+        in_addr_arpa = Zone('0.0.10.in-addr.arpa.', [])
+        ip6_arpa = Zone('0.0.0.0.fc00.ip6.arpa.', [])
 
         # no instances
         stubber.add_response(
@@ -124,14 +128,18 @@ class TestEc2Source(TestCase):
         )
         source.populate(zone)
         self.assertEqual(0, len(zone.records))
-        source.populate(arpa)
-        self.assertEqual(0, len(arpa.records))
+        source.populate(in_addr_arpa)
+        self.assertEqual(0, len(in_addr_arpa.records))
+        source.populate(ip6_arpa)
+        self.assertEqual(0, len(ip6_arpa.records))
 
     def test_instances(self):
         source, stubber = self._get_stubbed_source()
 
         zone = Zone('unit.tests.', [])
-        arpa = Zone('0.0.10.in-addr.arpa.', [])
+        in_addr_arpa = Zone('0.0.10.in-addr.arpa.', [])
+        # not realistic, but tests everything just fine
+        ip6_arpa = Zone('0.0.c.f.ip6.arpa.', [])
 
         stubber.add_response(
             'describe_instances', {'Reservations': self.reservations}
@@ -150,15 +158,25 @@ class TestEc2Source(TestCase):
         self.assertEqual(['fc00::2'], records[('2nd-v6', 'AAAA')].values)
         self.assertEqual(8, len(records))
 
-        # expect 3
-        source.populate(arpa)
-        records = {r.name: r for r in arpa.records}
+        # expect 3 ipv4 PTRs
+        source.populate(in_addr_arpa)
+        records = {r.name: r for r in in_addr_arpa.records}
         self.assertEqual('all.unit.tests.', records['14'].value)
         self.assertEqual('iv4.unit.tests.', records['15'].value)
         self.assertEqual(
             ['2nd.unit.tests.', 'v4.unit.tests.'], records['16'].values
         )
         self.assertEqual(3, len(records))
+
+        # expect 3 ipv6 PTRs
+        source.populate(ip6_arpa)
+        # we only vary in the last octect so pulling it out to avoid lots of 0.s
+        records = {r.name.split('.', 1)[0]: r for r in ip6_arpa.records}
+        self.assertEqual('all.unit.tests.', records['1'].value)
+        self.assertEqual(
+            ['2nd-v6.unit.tests.', 'v6.unit.tests.'], records['2'].values
+        )
+        self.assertEqual(2, len(records))
 
     def test_conflicting_fqdns(self):
         source, stubber = self._get_stubbed_source()
