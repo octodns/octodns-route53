@@ -158,53 +158,6 @@ class Ec2Source(_AuthMixin, BaseSource):
 
 
 class ElbSource(_AuthMixin, BaseSource):
-    '''
-    AWS ELB Source
-
-    elb:
-        class: octodns_route53.ElbSource
-        # The AWS access key id
-        access_key_id:
-        # The AWS secret access key
-        secret_access_key:
-        # The AWS session token (optional)
-        # Only needed if using temporary security credentials
-        #session_token:
-        # The region in which to look for ELB instances, required.
-        region: us-east-1
-        #ttl: 3600
-        #tag_prefix: octodns
-
-    Alternatively, you may leave out access_key_id, secret_access_key
-    and session_token.
-    This will result in boto3 deciding authentication dynamically.
-
-    In general the account used will need read permissions on ELB.
-
-    Records are driven off of tags attached to the ELB instances. Any tag with
-    `tag_prefix` is considered. The value of the tag should be a list of fqdns
-    separated by a `/` character. When a zone is being populated with records
-    the ELBs will be searched and any tagged with a fqdn that belongs in the
-    zone results in a CNAME being created pointing the FQDN to the ELB's
-    DNSName. Example tags:
-
-    # This will result in an ALIAS record for example.com. -> DNSName
-    octodns: example.com.
-
-    # This will result in a CNAME record for foo.example.com. -> DNSName
-    octodns: foo.example.com.
-
-    # This will result in CNAME records for foo.example.com. and bar.other.com.
-    # -> DNSName
-    octodns: foo.example.com./bar.other.com.
-
-    # Tags are limited to 255 characters so in order to support long and/or
-    # numerous fqdns tags prefixed with `tag_prefix` are considered. It is also
-    # acceptable to add multiple tags rather than separating things with `/`
-    octodns-1: foo.example.com.
-    octodns-2: bar.other.com.
-    '''
-
     SUPPORTS_GEO = False
     SUPPORTS = ('ALIAS', 'CNAME')
 

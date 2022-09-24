@@ -1,5 +1,6 @@
 ## v0.0.6 - 2022-??-?? -
 
+* Ec2Source added to support dynamically creating records for Ec2 instances
 * ElbSource added to support dynamically creating records for ELBs
 
 ## v0.0.5 - 2022-07-14 - Support the root

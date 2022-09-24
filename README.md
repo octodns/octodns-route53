@@ -32,6 +32,8 @@ octodns_route53==0.0.1
 
 ### Configuration
 
+#### Route53 Provider
+
 ```yaml
 providers:
   route53:
@@ -48,6 +50,76 @@ providers:
 Alternatively, you may leave out access_key_id, secret_access_key and session_token.  This will result in boto3 deciding authentication dynamically.
 
 In general the account used will need full permissions on Route53.
+
+#### Ec2Souce
+
+```yaml
+providers:
+  ec2:
+    class: octodns_route53.Ec2Source
+    # auth options are the same as Route53Provider
+    access_key_id: env/AWS_ACCESS_KEY_ID
+    secret_access_key: env/AWS_SECRET_ACCESS_KEY
+    # The region in which to look for EC2 instances, required.
+    region: us-east-1
+    # Prefix for tag keys containing fqdn(s)
+    #tag_prefix: octodns
+    #ttl: 3600
+```
+
+In general the account used will need read permissions on EC2 instances.
+
+Records are driven off of the tags attached to the EC2 instances. The "Name" tag and any tags starting with `tag_prefix` are considered.
+
+The value of the tag should be one or more fqdns separated by a `/` character.
+
+When a zone is being populated any fqdns matching the zone name will result in records. When the instance has a private IPv4 address an A record will be created. When the instance has an IPv6 address a AAAA record will be created.
+
+When the zone is a sub-zone of in-addr.arpa. PTR records will be created for private IPv4 addresses that match the zone. The value(s) will be the fqdn(s) associated with that private IPv4 address.
+
+When the zone is a sub-zone of ip6.arpa. PTR records will be created for IPv6 addresses that match the zone. The value(s) will be the fqdn(s) associated with that IPv6 address.
+
+#### ElbSouce
+
+```yaml
+providers:
+  elb:
+    class: octodns_route53.ElbSource
+    # auth options are the same as Route53Provider
+    access_key_id: env/AWS_ACCESS_KEY_ID
+    secret_access_key: env/AWS_SECRET_ACCESS_KEY
+    # The region in which to look for ELB instances, required.
+    region: us-east-1
+    # Prefix for tag keys containing fqdn(s)
+    #tag_prefix: octodns
+    #ttl: 3600
+```
+
+In general the account used will need read permissions on ELB instances and tags.
+
+Records are driven off of the ELB name and the tags attached to the ELB instances. Any tag with `tag_prefix` is considered.
+
+The value of the tag should be one or more fqdns separated by a `/` character.
+
+When a zone is being populated any fqdns matching the zone name will result in records CNAME records with the target value being the DNSName of the ELB instance.
+
+#### Example Tags for EC2/ELB
+
+# This will result in an ALIAS record for example.com. -> DNSName
+octodns: example.com.
+
+# This will result in a CNAME record for foo.example.com. -> DNSName
+octodns: foo.example.com.
+
+# This will result in CNAME records for foo.example.com. and bar.other.com.
+# -> DNSName
+octodns: foo.example.com./bar.other.com.
+
+# Tags are limited to 255 characters so in order to support long and/or
+# numerous fqdns tags prefixed with `tag_prefix` are considered. It is also
+# acceptable to add multiple tags rather than separating things with `/`
+octodns-1: foo.example.com.
+octodns-2: bar.other.com.
 
 #### Processors
 
