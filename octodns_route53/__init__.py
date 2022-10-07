@@ -41,7 +41,6 @@ def _healthcheck_ref_prefix(version, record_type, record_fqdn):
         ref = f'{version}:{record_type}:{hash_hex[0:20]}'
     return ref
 
-
 class _Route53Record(EqualityTupleMixin):
     @classmethod
     def _new_route53_alias(cls, provider, record, hosted_zone_id, creating):
@@ -213,9 +212,9 @@ class _Route53Record(EqualityTupleMixin):
         self._type = record._type
         self.ttl = record.ttl
         self.record = record
-
+        
         self._values = None
-
+    
     @property
     def values(self):
         if self._values is None:
@@ -225,7 +224,6 @@ class _Route53Record(EqualityTupleMixin):
         return self._values
 
     def mod(self, action, existing_rrsets):
-
         return {
             'Action': action,
             'ResourceRecordSet': {
@@ -233,7 +231,7 @@ class _Route53Record(EqualityTupleMixin):
                 'ResourceRecords': [{'Value': v} for v in self.values],
                 'TTL': self.ttl,
                 'Type': self._type,
-            },
+            }
         }
 
     # NOTE: we're using __hash__ and ordering methods that consider
@@ -319,7 +317,6 @@ class _Route53Record(EqualityTupleMixin):
     def _values_for_SRV(self, record):
         return [self._value_for_SRV(v, record) for v in record.values]
 
-
 class _Route53Alias(_Route53Record):
     def __init__(self, provider, hosted_zone_id, record, value, creating):
         super().__init__(provider, record, creating)
@@ -376,8 +373,7 @@ class _Route53DynamicPool(_Route53Record):
     ):
         fqdn_override = f'_octodns-{pool_name}-pool.{record.fqdn}'
         super(_Route53DynamicPool, self).__init__(
-            provider, record, creating, fqdn_override=fqdn_override
-        )
+            provider, record, creating, fqdn_override=fqdn_override)
 
         self.hosted_zone_id = hosted_zone_id
         self.pool_name = pool_name
@@ -485,7 +481,6 @@ class _Route53DynamicRule(_Route53Record):
         return (
             f'_Route53DynamicRule<{self.fqdn} {self._type} {self.index} '
             f'{self.geo} {self.target_dns_name}>'
-        )
 
 
 class _Route53DynamicValue(_Route53Record):
@@ -531,11 +526,13 @@ class _Route53DynamicValue(_Route53Record):
                 if self.fqdn == existing.get(
                     'Name'
                 ) and self.identifer == existing.get('SetIdentifier', None):
-                    return {'Action': action, 'ResourceRecordSet': existing}
+                    return {'Action': action, 'ResourceRecordSet': existing,
+                    }
 
         ret = {
             'Action': action,
             'ResourceRecordSet': {
+                'HealthCheckId': self.health_check_id,
                 'Name': self.fqdn,
                 'ResourceRecords': [{'Value': self.value}],
                 'SetIdentifier': self.identifer,
@@ -561,6 +558,7 @@ class _Route53DynamicValue(_Route53Record):
 
 
 class _Route53GeoDefault(_Route53Record):
+
     def mod(self, action, existing_rrsets):
         return {
             'Action': action,
@@ -585,6 +583,7 @@ class _Route53GeoDefault(_Route53Record):
 
 
 class _Route53GeoRecord(_Route53Record):
+
     def __init__(self, provider, record, ident, geo, creating):
         super(_Route53GeoRecord, self).__init__(provider, record, creating)
         self.geo = geo
@@ -748,7 +747,6 @@ class Route53Provider(BaseProvider):
 
     In general the account used will need full permissions on Route53.
     '''
-
     SUPPORTS_GEO = True
     SUPPORTS_DYNAMIC = True
     SUPPORTS_POOL_VALUE_STATUS = True
@@ -784,25 +782,34 @@ class Route53Provider(BaseProvider):
         session_token=None,
         delegation_set_id=None,
         get_zones_by_name=False,
+        vpc_id=None,
+        region=None,
         *args,
         **kwargs,
-    ):
+        ):
         self.max_changes = max_changes
         self.delegation_set_id = delegation_set_id
         self.get_zones_by_name = get_zones_by_name
+        self.vpc = vpc_id 
+        self.region = region
+        self.is_private = False
+        if self.vpc or self.region:
+            if self.vpc and self.region:
+                self.is_private = True
+            else:
+                raise Exception('vpc_id or region is missing.')
+
         _msg = (
             f'access_key_id={access_key_id}, secret_access_key=***, '
-            'session_token=***'
+               'session_token=***'
         )
-        use_fallback_auth = (
-            access_key_id is None
-            and secret_access_key is None
-            and session_token is None
-        )
+        use_fallback_auth = access_key_id is None and \
+            secret_access_key is None and session_token is None
         if use_fallback_auth:
             _msg = 'auth=fallback'
         self.log = logging.getLogger(f'Route53Provider[{id}]')
         self.log.debug('__init__: id=%s, %s', id, _msg)
+
         super(Route53Provider, self).__init__(id, *args, **kwargs)
 
         config = None
@@ -827,16 +834,44 @@ class Route53Provider(BaseProvider):
         self._r53_rrsets = {}
         self._health_checks = None
 
+    def _check_zone_horizon(self, zoneid):
+        id = zoneid.split('/', 2)[-1]
+        if self.is_private:
+            resp = self._conn.get_hosted_zone(Id=id)
+            if resp['HostedZone']['Config']['PrivateZone']:
+                for v in resp['VPCs']:
+                    if self.vpc and self.region in v.values():
+                        return True
+                    else:
+                        return False
+
+        if not self.is_private:
+            values = []
+            resp = self._conn.list_tags_for_resource(
+                ResourceId=id,
+                ResourceType='hostedzone',
+            )
+            for r in resp['ResourceTagSet']['Tags']:
+                for v in r.keys():
+                    values.append(r[v])
+            if '_octoManagedPrivateZone' in values:
+                return False
+            else:
+                return True
+
     def _get_zone_id_by_name(self, name):
-        # attempt to get zone by name
-        # limited to one as this should be unique
         id = None
-        resp = self._conn.list_hosted_zones_by_name(DNSName=name, MaxItems="1")
-        if len(resp['HostedZones']) != 0:
-            # if there is a response that starts with the name
-            if resp['HostedZones'][0]['Name'].startswith(name):
-                id = resp['HostedZones'][0]['Id']
-                self.log.debug('get_zones_by_name:   id=%s', id)
+        resp = self._conn.list_hosted_zones_by_name(
+            DNSName=name
+        )
+
+        for z in resp['HostedZones']:
+            if z['Config']['PrivateZone'] == self.is_private \
+                    and z['Name'].startswith(name):
+                if self._check_zone_horizon(z['Id']):
+                    id = z['Id']
+                    return id
+                    self.log.debug('get_zones_by_name:   id=%s', id)
         return id
 
     def update_r53_zones(self, name):
@@ -854,7 +889,8 @@ class Route53Provider(BaseProvider):
                 while more:
                     resp = self._conn.list_hosted_zones(**start)
                     for z in resp['HostedZones']:
-                        zones[z['Name']] = z['Id']
+                        if self._check_zone_horizon(z['Id']):
+                            zones[z['Name']] = z['Id']
                     more = resp['IsTruncated']
                     start['Marker'] = resp.get('NextMarker', None)
                 self._r53_zones = zones
@@ -867,24 +903,49 @@ class Route53Provider(BaseProvider):
         self.log.debug('_get_zone_id: name=%s', name)
         self.update_r53_zones(name)
         id = None
+
         if name in self._r53_zones:
             id = self._r53_zones[name]
             self.log.debug('_get_zone_id:   id=%s', id)
+
         if create and not id:
             ref = uuid4().hex
             del_set = self.delegation_set_id
             self.log.debug(
                 '_get_zone_id:   no matching zone, creating, ' 'ref=%s', ref
             )
-            if del_set:
+            if self.is_private:
+                VPConfig = {'VPCId': self.vpc, 'VPCRegion': self.region}
                 resp = self._conn.create_hosted_zone(
-                    Name=name, CallerReference=ref, DelegationSetId=del_set
+                    Name=name,
+                    VPC=VPConfig,
+                    HostedZoneConfig={
+                        'PrivateZone': True},
+                    CallerReference=ref
                 )
-            else:
-                resp = self._conn.create_hosted_zone(
-                    Name=name, CallerReference=ref
+                id = resp['HostedZone']['Id']
+                _id = id.split('/', 2)[-1]
+                _ = self._conn.change_tags_for_resource(
+                    ResourceType='hostedzone',
+                    ResourceId=_id,
+                    AddTags=[
+                        {
+                            'Key': '_octoManagedPrivateZone',
+                            'Value': 'True',
+                        },
+                    ]
                 )
-            self._r53_zones[name] = id = resp['HostedZone']['Id']
+
+            elif not self.is_private:
+                if del_set:
+                    resp = self._conn.create_hosted_zone(
+                        Name=name,
+                        CallerReference=ref,
+                        DelegationSetId=del_set)
+                else:
+                    resp = self._conn.create_hosted_zone(Name=name,
+                                                         CallerReference=ref)
+                    self._r53_zones[name] = id = resp['HostedZone']['Id']
         return id
 
     def _parse_geo(self, rrset):
@@ -1121,6 +1182,7 @@ class Route53Provider(BaseProvider):
                     }
                 )
 
+
         # Convert our map of rules into an ordered list now that we have all
         # the data
         for _, rule in sorted(rules.items()):
@@ -1131,7 +1193,7 @@ class Route53Provider(BaseProvider):
             data['dynamic']['rules'].append(r)
 
         return data
-
+  
     def _data_for_route53_alias(self, rrsets, zone_name):
         zone_name_len = len(zone_name) + 1
         values = []
@@ -1212,7 +1274,6 @@ class Route53Provider(BaseProvider):
             exists = True
             records = defaultdict(lambda: defaultdict(list))
             dynamic = defaultdict(lambda: defaultdict(list))
-            aliases = defaultdict(list)
 
             for rrset in self._load_records(zone_id):
                 record_name = zone.hostname_from_fqdn(rrset['Name'])
@@ -1329,7 +1390,6 @@ class Route53Provider(BaseProvider):
             record._octodns.get('route53', {})
             .get('healthcheck', {})
             .get('measure_latency', True)
-        )
 
     def _healthcheck_request_interval(self, record):
         interval = (
@@ -1359,6 +1419,7 @@ class Route53Provider(BaseProvider):
                 'parameter must be an integer '
                 'between 1 and 10.'
             )
+
 
     def _health_check_equivalent(
         self,
@@ -1419,11 +1480,6 @@ class Route53Provider(BaseProvider):
             status,
         )
 
-        if status == 'up':
-            # status up means no health check
-            self.log.debug('get_health_check_id:   status up, no health check')
-            return None
-
         try:
             ip_address(str(value))
             # We're working with an IP, host is the Host header
@@ -1479,8 +1535,6 @@ class Route53Provider(BaseProvider):
 
         # no existing matches, we need to create a new health check
         config = {
-            'Disabled': healthcheck_disabled,
-            'Inverted': healthcheck_inverted,
             'EnableSNI': healthcheck_protocol == 'HTTPS',
             'FailureThreshold': healthcheck_threshold,
             'MeasureLatency': healthcheck_latency,
@@ -1697,7 +1751,7 @@ class Route53Provider(BaseProvider):
             if (
                 fqdn == rrset['Name']
                 and record._type == rrset['Type']
-                and rrset.get('GeoLocation', {}).get('CountryCode', False)
+                and rrset.get('GeoLocation', {}).get('CountryCode', False) != '*' \
                 != '*'
                 and self._extra_changes_update_needed(record, rrset)
             ):
@@ -1724,12 +1778,6 @@ class Route53Provider(BaseProvider):
 
         fqdn = record.fqdn
         _type = record._type
-
-        # map values to statuses
-        statuses = {}
-        for pool in record.dynamic.pools.values():
-            for value in pool.data['values']:
-                statuses[value['value']] = value.get('status', 'obey')
 
         # loop through all the r53 rrsets
         for rrset in self._load_records(zone_id):
@@ -1867,7 +1915,7 @@ class Route53Provider(BaseProvider):
         # Ensure this batch is ordered (deletes before creates etc.)
         batch.sort(key=_mod_keyer)
         uuid = uuid4().hex
-        batch = {'Comment': f'Change: {uuid}', 'Changes': batch}
+        batch = {'Comment': f'Change: {uuid}','Changes': batch,}
         self.log.debug(
             '_really_apply:   sending change request, comment=%s',
             batch['Comment'],
