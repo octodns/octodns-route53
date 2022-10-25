@@ -1473,8 +1473,12 @@ class Route53Provider(_AuthMixin, BaseProvider):
         if healthcheck_protocol != 'TCP':
             config['FullyQualifiedDomainName'] = healthcheck_host
             config['ResourcePath'] = healthcheck_path
+        # we need either an IP address (A/AAAA) or a FullyQualifiedDomainName
+        # (CNAME)
         if value:
             config['IPAddress'] = value
+        else:
+            config['FullyQualifiedDomainName'] = healthcheck_host
 
         expected_ref = _healthcheck_ref_prefix(
             self.HEALTH_CHECK_VERSION, record._type, record.fqdn
