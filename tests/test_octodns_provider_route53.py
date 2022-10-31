@@ -4031,12 +4031,14 @@ class TestRoute53AliasRecord(TestCase):
         v1 = alias.values[1]
 
         self.assertEqual(
-            {
-                'evaluate-target-health': False,
-                'hosted-zone-id': None,
-                'name': 'something',
-                'type': 'A',
-            },
+            _Route53AliasValue(
+                {
+                    'evaluate-target-health': False,
+                    'hosted-zone-id': None,
+                    'name': 'something',
+                    'type': 'A',
+                }
+            ),
             v0.data,
         )
 
