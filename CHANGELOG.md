@@ -1,5 +1,6 @@
 ## v0.0.6 - 2022-??-?? -
 
+* Fixed issue with creating TCP healthchecks for dynamic CNAME records
 * Ec2Source added to support dynamically creating records for Ec2 instances
 * ElbSource added to support dynamically creating records for ELBs
 

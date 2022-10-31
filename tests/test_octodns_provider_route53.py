@@ -1821,6 +1821,7 @@ class TestRoute53Provider(TestCase):
             'EnableSNI': False,
             'Inverted': False,
             'FailureThreshold': 6,
+            'FullyQualifiedDomainName': 'target-1.unit.tests.',
             'MeasureLatency': True,
             'Port': 8080,
             'RequestInterval': 10,
