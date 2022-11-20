@@ -536,7 +536,7 @@ class TestRoute53Provider(TestCase):
     ]
 
     def _get_stubbed_provider(self):
-        provider = Route53Provider('test', 'abc', '123')
+        provider = Route53Provider('test', 'abc', '123', strict_supports=False)
 
         # Use the stubber
         stubber = Stubber(provider._conn)
@@ -546,7 +546,11 @@ class TestRoute53Provider(TestCase):
 
     def _get_stubbed_delegation_set_provider(self):
         provider = Route53Provider(
-            'test', 'abc', '123', delegation_set_id="ABCDEFG123456"
+            'test',
+            'abc',
+            '123',
+            delegation_set_id="ABCDEFG123456",
+            strict_supports=False,
         )
 
         # Use the stubber
@@ -556,7 +560,7 @@ class TestRoute53Provider(TestCase):
         return (provider, stubber)
 
     def _get_stubbed_fallback_auth_provider(self):
-        provider = Route53Provider('test')
+        provider = Route53Provider('test', strict_supports=False)
 
         # Use the stubber
         stubber = Stubber(provider._conn)
