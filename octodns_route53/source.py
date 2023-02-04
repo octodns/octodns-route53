@@ -6,8 +6,8 @@ from ipaddress import IPv4Address, IPv6Address
 from logging import getLogger
 
 from octodns.idna import idna_encode
-from octodns.source.base import BaseSource
 from octodns.record import Record
+from octodns.source.base import BaseSource
 
 from .auth import _AuthMixin
 

@@ -2,19 +2,20 @@
 #
 #
 
-from collections import defaultdict
-from ipaddress import AddressValueError, ip_address
-from pycountry_convert import country_alpha2_to_continent_code
-from uuid import uuid4
+import hashlib
 import logging
 import re
-import hashlib
+from collections import defaultdict
+from ipaddress import AddressValueError, ip_address
+from uuid import uuid4
+
+from pycountry_convert import country_alpha2_to_continent_code
 
 from octodns.equality import EqualityTupleMixin
-from octodns.record import Create, Record, Update
-from octodns.record.geo import GeoCodes
 from octodns.provider import ProviderException
 from octodns.provider.base import BaseProvider
+from octodns.record import Create, Record, Update
+from octodns.record.geo import GeoCodes
 
 from .auth import _AuthMixin
 from .record import Route53AliasRecord
@@ -83,7 +84,6 @@ class _Route53Record(EqualityTupleMixin):
 
         # Pools
         for pool_name, pool in record.dynamic.pools.items():
-
             # Create the primary, this will be the rrset that geo targeted
             # rrsets will point to when they want to use a pool of values. It's
             # a primary and observes target health so if all the values for
@@ -222,7 +222,6 @@ class _Route53Record(EqualityTupleMixin):
         return self._values
 
     def mod(self, action, existing_rrsets):
-
         return {
             'Action': action,
             'ResourceRecordSet': {
@@ -518,7 +517,6 @@ class _Route53DynamicValue(_Route53Record):
         return f'{self.pool_name}-{self.index:03d}'
 
     def mod(self, action, existing_rrsets):
-
         if action == 'DELETE':
             # When deleting records try and find the original rrset so that
             # we're 100% sure to have the complete & accurate data (this mostly
