@@ -2,8 +2,9 @@
 #
 #
 
-from botocore.stub import Stubber
 from unittest import TestCase
+
+from botocore.stub import Stubber
 
 from octodns.zone import Zone
 

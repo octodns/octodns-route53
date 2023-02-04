@@ -8,7 +8,6 @@ from octodns.processor.base import BaseProcessor
 
 
 class AwsAcmMangingProcessor(BaseProcessor):
-
     log = getLogger('AwsAcmMangingProcessor')
 
     def _ignore_awsacm_cnames(self, zone):

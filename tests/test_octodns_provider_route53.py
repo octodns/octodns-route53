@@ -2,27 +2,28 @@
 #
 #
 
-from botocore.exceptions import ClientError
-from botocore.stub import ANY, Stubber
 from unittest import TestCase
 from unittest.mock import patch
+
+from botocore.exceptions import ClientError
+from botocore.stub import ANY, Stubber
 
 from octodns.record import Create, Delete, Record, Update
 from octodns.zone import Zone
 
 from octodns_route53 import Route53Provider, Route53ProviderException
-from octodns_route53.record import _Route53AliasValue, Route53AliasRecord
 from octodns_route53.processor import AwsAcmMangingProcessor
 from octodns_route53.provider import (
+    _healthcheck_ref_prefix,
+    _mod_keyer,
+    _octal_replace,
     _Route53Alias,
     _Route53DynamicValue,
     _Route53GeoDefault,
     _Route53GeoRecord,
     _Route53Record,
-    _mod_keyer,
-    _octal_replace,
-    _healthcheck_ref_prefix,
 )
+from octodns_route53.record import Route53AliasRecord, _Route53AliasValue
 
 
 class GeoProvider(object):
@@ -3091,7 +3092,6 @@ class TestRoute53Provider(TestCase):
         stubber.assert_no_pending_responses()
 
     def _get_test_plan(self, max_changes):
-
         provider = Route53Provider('test', 'abc', '123', max_changes)
 
         # Use the stubber
@@ -3171,7 +3171,6 @@ class TestRoute53Provider(TestCase):
     @patch('octodns_route53.Route53Provider._load_records')
     @patch('octodns_route53.Route53Provider._really_apply')
     def test_apply_1(self, really_apply_mock, _):
-
         # 18 RRs with max of 19 should only get applied in one call
         provider, plan = self._get_test_plan(19)
         provider.apply(plan)
@@ -3180,7 +3179,6 @@ class TestRoute53Provider(TestCase):
     @patch('octodns_route53.Route53Provider._load_records')
     @patch('octodns_route53.Route53Provider._really_apply')
     def test_apply_2(self, really_apply_mock, _):
-
         # 18 RRs with max of 17 should only get applied in two calls
         provider, plan = self._get_test_plan(18)
         provider.apply(plan)
@@ -3189,7 +3187,6 @@ class TestRoute53Provider(TestCase):
     @patch('octodns_route53.Route53Provider._load_records')
     @patch('octodns_route53.Route53Provider._really_apply')
     def test_apply_3(self, really_apply_mock, _):
-
         # with a max of seven modifications, three calls
         provider, plan = self._get_test_plan(7)
         provider.apply(plan)
@@ -3198,7 +3195,6 @@ class TestRoute53Provider(TestCase):
     @patch('octodns_route53.Route53Provider._load_records')
     @patch('octodns_route53.Route53Provider._really_apply')
     def test_apply_4(self, really_apply_mock, _):
-
         # with a max of 11 modifications, two calls
         provider, plan = self._get_test_plan(11)
         provider.apply(plan)
@@ -3207,7 +3203,6 @@ class TestRoute53Provider(TestCase):
     @patch('octodns_route53.Route53Provider._load_records')
     @patch('octodns_route53.Route53Provider._really_apply')
     def test_apply_bad(self, really_apply_mock, _):
-
         # with a max of 1 modifications, fail
         provider, plan = self._get_test_plan(1)
         with self.assertRaises(Exception) as ctx:
@@ -3836,7 +3831,6 @@ class TestRoute53Records(TestCase):
 
 class TestModKeyer(TestCase):
     def test_mod_keyer(self):
-
         # First "column" is the action priority for C/R/U
 
         # Deletes come first
