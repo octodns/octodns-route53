@@ -4118,7 +4118,7 @@ class TestRoute53AliasRecord(TestCase):
             [],
             _Route53AliasValue.validate(
                 {
-                    'name': 'foo.awsglobalaccelerator.com-',
+                    'name': 'foo.awsglobalaccelerator.com.',
                     'hosted-zone-id': 'good',
                     'type': 'A',
                 },
