@@ -91,7 +91,7 @@ class Route53AliasRecord(ValuesMixin, Record):
     # https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/resource-record-sets-values-alias-common.html#rrsets-values-alias-common-target
     #
     # Global Accelerator: https://docs.aws.amazon.com/general/latest/gr/global_accelerator.html
-    # Please note that the docs are misleading. While they state 
+    # Please note that the docs are misleading. While they state
     # 'globalaccelerator.amazonaws.com' as service endpoint, the actual ALIAS
     # record has to point to `xyz.awsglobalaccelerator.com` in hosted zone ID
     # Z2BJ6XQ5FK7U4H
@@ -99,7 +99,7 @@ class Route53AliasRecord(ValuesMixin, Record):
         'amazonaws.com.',
         'cloudfront.net.',
         'elasticbeanstalk.com.',
-        'awsglobalaccelerator.com.'
+        'awsglobalaccelerator.com.',
     )
 
     @classmethod
