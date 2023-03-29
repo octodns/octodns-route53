@@ -4113,6 +4113,19 @@ class TestRoute53AliasRecord(TestCase):
             ),
         )
 
+        # valid service (awsglobalaccelerator)
+        self.assertEqual(
+            [],
+            _Route53AliasValue.validate(
+                {
+                    'name': 'foo.awsglobalaccelerator.com-',
+                    'hosted-zone-id': 'good',
+                    'type': 'A',
+                },
+                Route53AliasRecord._type,
+            ),
+        )
+
         # valid service (elasticbeanstalk)
         self.assertEqual(
             [],
