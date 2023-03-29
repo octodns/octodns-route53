@@ -99,7 +99,7 @@ class Route53AliasRecord(ValuesMixin, Record):
         'amazonaws.com.',
         'cloudfront.net.',
         'elasticbeanstalk.com.',
-        'awsglobalaccelerator.com'
+        'awsglobalaccelerator.com.'
     )
 
     @classmethod
