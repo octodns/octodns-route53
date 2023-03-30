@@ -569,6 +569,127 @@ class TestRoute53Provider(TestCase):
 
         return (provider, stubber)
 
+    def _get_stubbed_get_zones_by_name_enabled_provider(self):
+        provider = Route53Provider(
+            'test', 'abc', '123', get_zones_by_name=True, strict_supports=False
+        )
+
+        # Use the stubber
+        stubber = Stubber(provider._conn)
+        stubber.activate()
+
+        return (provider, stubber)
+
+    def test_update_r53_zones(self):
+        provider, stubber = self._get_stubbed_provider()
+
+        list_hosted_zones = {
+            'HostedZones': [
+                {
+                    'Id': 'z40',
+                    'Name': 'unit.tests.',
+                    'CallerReference': 'abc',
+                    'Config': {'Comment': 'string', 'PrivateZone': False},
+                    'ResourceRecordSetCount': 123,
+                }
+            ],
+            'Marker': 'm',
+            'IsTruncated': False,
+            'MaxItems': '100',
+        }
+
+        stubber.add_response('list_hosted_zones', list_hosted_zones)
+
+        provider.update_r53_zones("unit.tests.")
+        self.assertEqual(provider._r53_zones, {'unit.tests.': 'z40'})
+
+    def test_update_r53_zones_with_get_zones_by_name(self):
+        (
+            provider,
+            stubber,
+        ) = self._get_stubbed_get_zones_by_name_enabled_provider()
+
+        list_hosted_zones_by_name_resp = {
+            'HostedZones': [
+                {
+                    'Id': 'z40',
+                    'Name': 'unit.tests.',
+                    'CallerReference': 'abc',
+                    'Config': {'Comment': 'string', 'PrivateZone': False},
+                    'ResourceRecordSetCount': 123,
+                }
+            ],
+            'DNSName': 'unit.tests.',
+            'IsTruncated': False,
+            'MaxItems': '1',
+        }
+
+        stubber.add_response(
+            'list_hosted_zones_by_name',
+            list_hosted_zones_by_name_resp,
+            {'DNSName': 'unit.tests.', 'MaxItems': '1'},
+        )
+
+        provider.update_r53_zones("unit.tests.")
+        self.assertEqual(provider._r53_zones, {'unit.tests.': 'z40'})
+
+    def test_update_r53_zones_with_octal_replaced(self):
+        provider, stubber = self._get_stubbed_provider()
+
+        list_hosted_zones = {
+            'HostedZones': [
+                {
+                    'Id': 'z41',
+                    'Name': '0\\05725.2.0.192.in-addr.arpa.',
+                    'CallerReference': 'abc',
+                    'Config': {'Comment': 'string', 'PrivateZone': False},
+                    'ResourceRecordSetCount': 123,
+                }
+            ],
+            'Marker': 'm',
+            'IsTruncated': False,
+            'MaxItems': '100',
+        }
+
+        stubber.add_response('list_hosted_zones', list_hosted_zones)
+
+        provider.update_r53_zones("0/25.2.0.192.in-addr.arpa.")
+        self.assertEqual(
+            provider._r53_zones, {'0/25.2.0.192.in-addr.arpa.': 'z41'}
+        )
+
+    def test_update_r53_zones_with_get_zones_by_name_octal_replaced(self):
+        (
+            provider,
+            stubber,
+        ) = self._get_stubbed_get_zones_by_name_enabled_provider()
+
+        list_hosted_zones_by_name_resp = {
+            'HostedZones': [
+                {
+                    'Id': 'z41',
+                    'Name': '0\\05725.2.0.192.in-addr.arpa.',
+                    'CallerReference': 'abc',
+                    'Config': {'Comment': 'string', 'PrivateZone': False},
+                    'ResourceRecordSetCount': 123,
+                }
+            ],
+            'DNSName': '0/25.2.0.192.in-addr.arpa.',
+            'IsTruncated': False,
+            'MaxItems': '1',
+        }
+
+        stubber.add_response(
+            'list_hosted_zones_by_name',
+            list_hosted_zones_by_name_resp,
+            {'DNSName': '0/25.2.0.192.in-addr.arpa.', 'MaxItems': '1'},
+        )
+
+        provider.update_r53_zones("0/25.2.0.192.in-addr.arpa.")
+        self.assertEqual(
+            provider._r53_zones, {'0/25.2.0.192.in-addr.arpa.': 'z41'}
+        )
+
     # with fallback boto makes an unstubbed call to the 169. metadata api, this
     # stubs that bit out
     @patch('botocore.credentials.CredentialResolver.load_credentials')
@@ -936,6 +1057,57 @@ class TestRoute53Provider(TestCase):
         nonexistent = Zone('does.not.exist.', [])
         provider.populate(nonexistent)
         self.assertEqual(set(), nonexistent.records)
+
+    def test_populate_for_octal_replaced_domain_name(self):
+        provider, stubber = self._get_stubbed_provider()
+
+        expected = Zone('0/25.2.0.192.in-addr.arpa.', [])
+        record = Record.new(
+            expected,
+            '1',
+            {'ttl': 30, 'type': 'PTR', 'value': 'hostname.example.com.'},
+        )
+        expected.add_record(record)
+
+        got = Zone('0/25.2.0.192.in-addr.arpa.', [])
+
+        list_hosted_zones_resp = {
+            'HostedZones': [
+                {
+                    'Name': '0\\05725.2.0.192.in-addr.arpa.',
+                    'Id': 'z41',
+                    'CallerReference': 'abc',
+                }
+            ],
+            'Marker': 'm',
+            'IsTruncated': False,
+            'MaxItems': '100',
+        }
+        stubber.add_response('list_hosted_zones', list_hosted_zones_resp, {})
+        list_resource_record_sets_resp = {
+            'ResourceRecordSets': [
+                {
+                    'Name': '1.0\\05725.2.0.192.in-addr.arpa.',
+                    'Type': 'PTR',
+                    'ResourceRecords': [{'Value': 'hostname.example.com.'}],
+                    'TTL': 30,
+                }
+            ],
+            'IsTruncated': False,
+            'MaxItems': '100',
+        }
+        stubber.add_response(
+            'list_resource_record_sets',
+            list_resource_record_sets_resp,
+            {'HostedZoneId': 'z41'},
+        )
+
+        # Load everything
+        provider.populate(got)
+        # Make sure we got what we expected
+        changes = expected.changes(got, GeoProvider())
+        self.assertEqual(0, len(changes))
+        stubber.assert_no_pending_responses()
 
     def test_sync(self):
         provider, stubber = self._get_stubbed_provider()
@@ -2241,11 +2413,10 @@ class TestRoute53Provider(TestCase):
         stubber.assert_no_pending_responses()
 
     def test_no_changes_with_get_zones_by_name(self):
-        provider = Route53Provider('test', 'abc', '123', get_zones_by_name=True)
-
-        # Use the stubber
-        stubber = Stubber(provider._conn)
-        stubber.activate()
+        (
+            provider,
+            stubber,
+        ) = self._get_stubbed_get_zones_by_name_enabled_provider()
 
         list_hosted_zones_by_name_resp_1 = {
             'HostedZones': [
@@ -2304,11 +2475,10 @@ class TestRoute53Provider(TestCase):
         stubber.assert_no_pending_responses()
 
     def test_zone_not_found_get_zones_by_name(self):
-        provider = Route53Provider('test', 'abc', '123', get_zones_by_name=True)
-
-        # Use the stubber
-        stubber = Stubber(provider._conn)
-        stubber.activate()
+        (
+            provider,
+            stubber,
+        ) = self._get_stubbed_get_zones_by_name_enabled_provider()
 
         list_hosted_zones_by_name_resp = {
             'HostedZones': [
@@ -2339,11 +2509,10 @@ class TestRoute53Provider(TestCase):
         stubber.assert_no_pending_responses()
 
     def test_plan_apply_with_get_zones_by_name_zone_not_exists(self):
-        provider = Route53Provider('test', 'abc', '123', get_zones_by_name=True)
-
-        # Use the stubber
-        stubber = Stubber(provider._conn)
-        stubber.activate()
+        (
+            provider,
+            stubber,
+        ) = self._get_stubbed_get_zones_by_name_enabled_provider()
 
         # this is an empty response
         # zone name not found
@@ -2434,11 +2603,10 @@ class TestRoute53Provider(TestCase):
         stubber.assert_no_pending_responses()
 
     def test_plan_apply_with_get_zones_by_name_zone_exists(self):
-        provider = Route53Provider('test', 'abc', '123', get_zones_by_name=True)
-
-        # Use the stubber
-        stubber = Stubber(provider._conn)
-        stubber.activate()
+        (
+            provider,
+            stubber,
+        ) = self._get_stubbed_get_zones_by_name_enabled_provider()
 
         list_hosted_zones_by_name_resp = {
             'HostedZones': [

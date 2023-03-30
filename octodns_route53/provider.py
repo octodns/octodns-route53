@@ -814,7 +814,7 @@ class Route53Provider(_AuthMixin, BaseProvider):
         resp = self._conn.list_hosted_zones_by_name(DNSName=name, MaxItems="1")
         if len(resp['HostedZones']) != 0:
             # if there is a response that starts with the name
-            if resp['HostedZones'][0]['Name'].startswith(name):
+            if _octal_replace(resp['HostedZones'][0]['Name']).startswith(name):
                 id = resp['HostedZones'][0]['Id']
                 self.log.debug('get_zones_by_name:   id=%s', id)
         return id
@@ -834,7 +834,7 @@ class Route53Provider(_AuthMixin, BaseProvider):
                 while more:
                     resp = self._conn.list_hosted_zones(**start)
                     for z in resp['HostedZones']:
-                        zones[z['Name']] = z['Id']
+                        zones[_octal_replace(z['Name'])] = z['Id']
                     more = resp['IsTruncated']
                     start['Marker'] = resp.get('NextMarker', None)
                 self._r53_zones = zones
@@ -1195,8 +1195,8 @@ class Route53Provider(_AuthMixin, BaseProvider):
             aliases = defaultdict(list)
 
             for rrset in self._load_records(zone_id):
-                record_name = zone.hostname_from_fqdn(rrset['Name'])
-                record_name = _octal_replace(record_name)
+                record_name = _octal_replace(rrset['Name'])
+                record_name = zone.hostname_from_fqdn(record_name)
                 record_type = rrset['Type']
                 if record_type not in self.SUPPORTS:
                     # Skip stuff we don't support
