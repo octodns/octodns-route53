@@ -18,6 +18,7 @@ from octodns.record import Create, Record, Update
 from octodns.record.geo import GeoCodes
 
 from .auth import _AuthMixin
+from .geo_latency import GeoLatency
 from .record import Route53AliasRecord
 
 octal_re = re.compile(r'\\(\d\d\d)')
@@ -147,6 +148,10 @@ class _Route53Record(EqualityTupleMixin):
                 )
 
         # Rules
+        mode = 'geos'
+        if record._octodns.get('route53', {}).get('mode', 'geos') == 'latency':
+            mode = 'latency'
+
         for i, rule in enumerate(record.dynamic.rules):
             pool_name = rule.data['pool']
             geos = rule.data.get('geos', [])
@@ -163,6 +168,7 @@ class _Route53Record(EqualityTupleMixin):
                             i,
                             creating,
                             geo=geo,
+                            mode=mode,
                         )
                     )
             else:
@@ -432,6 +438,7 @@ class _Route53DynamicRule(_Route53Record):
         index,
         creating,
         geo=None,
+        mode='geos',
     ):
         super().__init__(provider, record, creating)
 
@@ -441,6 +448,7 @@ class _Route53DynamicRule(_Route53Record):
         self.index = index
 
         self.target_dns_name = f'_octodns-{pool_name}-pool.{record.fqdn}'
+        self.mode = mode
 
     @property
     def identifer(self):
@@ -453,24 +461,34 @@ class _Route53DynamicRule(_Route53Record):
                 'EvaluateTargetHealth': True,
                 'HostedZoneId': self.hosted_zone_id,
             },
-            'GeoLocation': {'CountryCode': '*'},
             'Name': self.fqdn,
             'SetIdentifier': self.identifer,
             'Type': self._type,
         }
 
-        if self.geo:
-            geo = GeoCodes.parse(self.geo)
-
-            if geo['province_code']:
-                rrset['GeoLocation'] = {
-                    'CountryCode': geo['country_code'],
-                    'SubdivisionCode': geo['province_code'],
-                }
-            elif geo['country_code']:
-                rrset['GeoLocation'] = {'CountryCode': geo['country_code']}
+        # if octodns/route53/mode is set to latency we fetch "region" for use latency mode
+        if self.mode == 'latency':
+            geo = GeoLatency.parse(self.geo)
+            if geo['region'] is not None:
+                rrset['Region'] = geo['region']
             else:
-                rrset['GeoLocation'] = {'ContinentCode': geo['continent_code']}
+                rrset['Region'] = 'us-east-1'  # default value if region
+        else:
+            rrset['GeoLocation'] = {'CountryCode': '*'}
+            if self.geo:
+                geo = GeoCodes.parse(self.geo)
+
+                if geo['province_code']:
+                    rrset['GeoLocation'] = {
+                        'CountryCode': geo['country_code'],
+                        'SubdivisionCode': geo['province_code'],
+                    }
+                elif geo['country_code']:
+                    rrset['GeoLocation'] = {'CountryCode': geo['country_code']}
+                else:
+                    rrset['GeoLocation'] = {
+                        'ContinentCode': geo['continent_code']
+                    }
 
         return {'Action': action, 'ResourceRecordSet': rrset}
 
@@ -677,7 +695,7 @@ def _mod_keyer(mod):
     # dependency order, we just rely on that.
 
     # Get the unique ID from the name/id to get a consistent ordering.
-    if rrset.get('GeoLocation', False):
+    if rrset.get('GeoLocation', False) or rrset.get('Region', False):
         unique_id = rrset['SetIdentifier']
     else:
         if 'SetIdentifier' in rrset:
@@ -686,7 +704,7 @@ def _mod_keyer(mod):
             unique_id = rrset['Name']
 
     # Prioritise within the action_priority, ensuring targets come first.
-    if rrset.get('GeoLocation', False):
+    if rrset.get('GeoLocation', False) or rrset.get('Region', False):
         # Geos reference pools, so they come last.
         record_priority = 3
     elif rrset.get('AliasTarget', False):
@@ -1070,6 +1088,19 @@ class Route53Provider(_AuthMixin, BaseProvider):
                 geo = self._parse_geo(rrset)
                 if geo:
                     rules[i]['geos'].append(geo)
+            elif 'Region' in rrset:
+                # These are rules
+                _id = rrset['SetIdentifier']
+                # We record rule index as the first part of set-id, the 2nd
+                # part just ensures uniqueness across geos and is ignored
+                i = int(_id.split('-', 1)[0])
+                target_pool = _parse_pool_name(rrset['AliasTarget']['DNSName'])
+                # Record the pool
+                rules[i]['pool'] = target_pool
+                # Record geo
+                geo = _id.split('-', 1)[1].replace(target_pool + "-", "")
+                rules[i]['geos'].append(geo)
+                data['octodns'] = {'route53': {'mode': 'latency'}}
             else:
                 # These are the pool value(s)
                 # Grab the pool name out of the SetIdentifier, format looks
@@ -1721,6 +1752,14 @@ class Route53Provider(_AuthMixin, BaseProvider):
             # Break off the first piece of the name, it'll let us figure out if
             # this is an rrset we're interested in.
             maybe_meta, rest = name.split('.', 1)
+
+            # detect geo mode changes (latency <> geos)
+            mode = record._octodns.get('route53', {}).get('mode', 'geos')
+            if (name == fqdn) and (
+                (mode == "latency" and "Region" not in rrset)
+                or (mode != "latency" and "Region" in rrset)
+            ):
+                return True
 
             if (
                 not maybe_meta.startswith('_octodns-')

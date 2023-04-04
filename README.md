@@ -154,6 +154,70 @@ Route53Provider supports full root NS record management.
 
 Route53Provider supports dynamic records, CNAME health checks don't support a Host header.
 
+#### GeoDNS records
+
+Route53Provider support GeoDNS [dynamic records](https://github.com/octodns/octodns/blob/main/docs/dynamic_records.md#dynamic-record-support) with Route53 GeoLocation or Latency features. Route53Provider supports the following options:
+
+| Key  | Description | Default |
+|--|--|--|
+| mode | define geo dynamic records mode [geos\|latency]  | geos |
+
+geos example :
+```yaml
+---
+test:
+  dynamic:
+    pools:
+      eu:
+        values:
+        - value: 1.1.1.1
+      us:
+        values:
+        - value: 2.2.2.2
+    rules:
+     - geos:
+         - EU
+       pool: eu
+     - geos:
+         - NA
+         - SA
+       pool: us
+  ttl: 60
+  type: A
+  value: 1.1.1.1
+```
+
+latency example :
+```yaml
+---
+test:
+  dynamic:
+    pools:
+      us-east-1:
+        values:
+        - value: 1.1.1.1
+          status: obey
+      us-west-1:
+        values:
+        - value: 2.2.2.2
+          status: obey
+    rules:
+     - geos:
+         - NA-US-VA
+       pool: us-east-1
+     - geos:
+         - NA-US-CA
+       pool: us-west-1
+  ttl: 60
+  type: A
+  value: 1.1.1.1
+  octodns:
+    route53:
+      mode: latency
+```
+
+For select specific AWS region, you should determine the right Geo Codes ([geo_latency_data.py](/octodns_route53/geo_latency_data.py)), be careful Route53 doesn't support multiple entries with same Region, default region (if Geo Codes doesn't match with a region) is `us-east-1`.
+
 #### Provider Specific Types
 
 `Route53Provider/ALIAS` adds support for the Route53 specific symlink style alias records.
