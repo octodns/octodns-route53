@@ -12,7 +12,6 @@ from octodns.record import Create, Delete, Record, Update
 from octodns.zone import Zone
 
 from octodns_route53 import Route53Provider, Route53ProviderException
-from octodns_route53.geo_latency import GeoLatency
 from octodns_route53.processor import AwsAcmMangingProcessor
 from octodns_route53.provider import (
     _healthcheck_ref_prefix,
@@ -545,7 +544,7 @@ dynamic_record_latency_data = {
     'ttl': 60,
     'type': 'A',
     'values': ['1.1.2.1', '1.1.2.2'],
-    'octodns': {'route53': {'mode': 'latency'}},
+    'octodns': {'route53': {'dynamic_mode': 'latency'}},
 }
 
 
@@ -3427,7 +3426,7 @@ class TestRoute53Provider(TestCase):
         self.assertEqual(0, len(extra))
         stubber.assert_no_pending_responses()
 
-        record._octodns['route53'] = {'mode': 'latency'}
+        record._octodns['route53'] = {'dynamic_mode': 'latency'}
         extra = provider._extra_changes(desired=desired, changes=[])
         self.assertEqual(1, len(extra))
         stubber.assert_no_pending_responses()
@@ -3744,71 +3743,6 @@ class TestRoute53Provider(TestCase):
 
         data = provider._data_for_dynamic('', 'A', dynamic_rrsets_latency)
         self.assertEqual(dynamic_record_latency_data, data)
-
-    def test_geo_latency(self):
-        self.assertEqual(
-            {
-                'continent_code': 'NA',
-                'country_code': None,
-                'province_code': None,
-                'region': 'us-east-1',
-            },
-            GeoLatency.parse('NA'),
-        )
-        self.assertEqual(
-            {
-                'continent_code': 'NA',
-                'country_code': 'US',
-                'province_code': None,
-                'region': 'us-east-1',
-            },
-            GeoLatency.parse('NA-US'),
-        )
-        self.assertEqual(
-            {
-                'continent_code': 'EU',
-                'country_code': 'AD',
-                'province_code': None,
-                'region': None,
-            },
-            GeoLatency.parse('EU-AD'),
-        )
-        self.assertEqual(
-            {
-                'continent_code': 'NA',
-                'country_code': 'US',
-                'province_code': 'CA',
-                'region': 'us-west-1',
-            },
-            GeoLatency.parse('NA-US-CA'),
-        )
-        self.assertEqual(
-            {
-                'continent_code': 'NA',
-                'country_code': 'US',
-                'province_code': 'AK',
-                'region': None,
-            },
-            GeoLatency.parse('NA-US-AK'),
-        )
-        self.assertEqual(
-            {
-                'continent_code': 'OC',
-                'country_code': None,
-                'province_code': None,
-                'region': None,
-            },
-            GeoLatency.parse('OC'),
-        )
-        self.assertEqual(
-            {
-                'continent_code': '',
-                'country_code': None,
-                'province_code': None,
-                'region': None,
-            },
-            GeoLatency.parse(''),
-        )
 
     @patch('octodns_route53.Route53Provider._get_zone_id')
     @patch('octodns_route53.Route53Provider._load_records')
@@ -4583,7 +4517,7 @@ class TestRoute53Records(TestCase):
                             'EvaluateTargetHealth': True,
                             'HostedZoneId': 'z45',
                         },
-                        'Region': 'ap-northeast-1',
+                        'Region': 'ap-southeast-1',
                         'Name': 'unit.tests.',
                         'SetIdentifier': '0-ap-southeast-1-AS-JP',
                         'Type': 'A',
@@ -4611,7 +4545,7 @@ class TestRoute53Records(TestCase):
                             'EvaluateTargetHealth': True,
                             'HostedZoneId': 'z45',
                         },
-                        'Region': 'eu-west-1',
+                        'Region': 'eu-central-1',
                         'Name': 'unit.tests.',
                         'SetIdentifier': '1-eu-central-1-EU',
                         'Type': 'A',
@@ -4625,7 +4559,7 @@ class TestRoute53Records(TestCase):
                             'EvaluateTargetHealth': True,
                             'HostedZoneId': 'z45',
                         },
-                        'Region': 'us-east-1',
+                        'Region': 'eu-central-1',
                         'Name': 'unit.tests.',
                         'SetIdentifier': '1-eu-central-1-NA-US-VI',
                         'Type': 'A',

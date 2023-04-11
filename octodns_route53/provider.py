@@ -18,7 +18,6 @@ from octodns.record import Create, Record, Update
 from octodns.record.geo import GeoCodes
 
 from .auth import _AuthMixin
-from .geo_latency import GeoLatency
 from .record import Route53AliasRecord
 
 octal_re = re.compile(r'\\(\d\d\d)')
@@ -95,7 +94,7 @@ class _Route53Record(EqualityTupleMixin):
                 )
             )
 
-            # Create the fallback for this pool
+            # Create the fallback for this pool (if dynamic_mode == geos else ignore fallback)
             fallback = pool.data.get('fallback', False)
             if fallback:
                 # We have an explicitly configured fallback, another pool to
@@ -147,11 +146,15 @@ class _Route53Record(EqualityTupleMixin):
                     )
                 )
 
-        # Rules
-        mode = 'geos'
-        if record._octodns.get('route53', {}).get('mode', 'geos') == 'latency':
-            mode = 'latency'
+        # switch between geographical-based routing or latency-based routing
+        dynamic_mode = 'geos'
+        if (
+            record._octodns.get('route53', {}).get('dynamic_mode', 'geos')
+            == 'latency'
+        ):
+            dynamic_mode = 'latency'
 
+        # Rules
         for i, rule in enumerate(record.dynamic.rules):
             pool_name = rule.data['pool']
             geos = rule.data.get('geos', [])
@@ -168,7 +171,7 @@ class _Route53Record(EqualityTupleMixin):
                             i,
                             creating,
                             geo=geo,
-                            mode=mode,
+                            dynamic_mode=dynamic_mode,
                         )
                     )
             else:
@@ -438,7 +441,7 @@ class _Route53DynamicRule(_Route53Record):
         index,
         creating,
         geo=None,
-        mode='geos',
+        dynamic_mode='geos',
     ):
         super().__init__(provider, record, creating)
 
@@ -448,7 +451,7 @@ class _Route53DynamicRule(_Route53Record):
         self.index = index
 
         self.target_dns_name = f'_octodns-{pool_name}-pool.{record.fqdn}'
-        self.mode = mode
+        self.dynamic_mode = dynamic_mode
 
     @property
     def identifer(self):
@@ -466,13 +469,9 @@ class _Route53DynamicRule(_Route53Record):
             'Type': self._type,
         }
 
-        # if octodns/route53/mode is set to latency we fetch "region" for use latency mode
-        if self.mode == 'latency':
-            geo = GeoLatency.parse(self.geo)
-            if geo['region'] is not None:
-                rrset['Region'] = geo['region']
-            else:
-                rrset['Region'] = 'us-east-1'  # default value if region
+        # if octodns/route53/mode is set to latency we use "Region" for use latency mode
+        if self.dynamic_mode == 'latency':
+            rrset['Region'] = self.pool_name
         else:
             rrset['GeoLocation'] = {'CountryCode': '*'}
             if self.geo:
@@ -489,7 +488,6 @@ class _Route53DynamicRule(_Route53Record):
                     rrset['GeoLocation'] = {
                         'ContinentCode': geo['continent_code']
                     }
-
         return {'Action': action, 'ResourceRecordSet': rrset}
 
     def __hash__(self):
@@ -1100,7 +1098,8 @@ class Route53Provider(_AuthMixin, BaseProvider):
                 # Record geo
                 geo = _id.split('-', 1)[1].replace(target_pool + "-", "")
                 rules[i]['geos'].append(geo)
-                data['octodns'] = {'route53': {'mode': 'latency'}}
+                # fill options with dynamic_mode latency
+                data['octodns'] = {'route53': {'dynamic_mode': 'latency'}}
             else:
                 # These are the pool value(s)
                 # Grab the pool name out of the SetIdentifier, format looks
@@ -1754,10 +1753,12 @@ class Route53Provider(_AuthMixin, BaseProvider):
             maybe_meta, rest = name.split('.', 1)
 
             # detect geo mode changes (latency <> geos)
-            mode = record._octodns.get('route53', {}).get('mode', 'geos')
+            dynamic_mode = record._octodns.get('route53', {}).get(
+                'dynamic_mode', 'geos'
+            )
             if (name == fqdn) and (
-                (mode == "latency" and "Region" not in rrset)
-                or (mode != "latency" and "Region" in rrset)
+                (dynamic_mode == "latency" and "Region" not in rrset)
+                or (dynamic_mode != "latency" and "Region" in rrset)
             ):
                 return True
 

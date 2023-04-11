@@ -156,11 +156,11 @@ Route53Provider supports dynamic records, CNAME health checks don't support a Ho
 
 #### GeoDNS records
 
-Route53Provider support GeoDNS [dynamic records](https://github.com/octodns/octodns/blob/main/docs/dynamic_records.md#dynamic-record-support) with Route53 GeoLocation or Latency features. Route53Provider supports the following options:
+Route53Provider support GeoDNS [dynamic records](https://github.com/octodns/octodns/blob/main/docs/dynamic_records.md#dynamic-record-support) with GeoLocation or Latency routing features. Route53Provider supports the following options:
 
 | Key  | Description | Default |
 |--|--|--|
-| mode | define geo dynamic records mode [geos\|latency]  | geos |
+| dynamic_mode | define dynamic records routing  mode between [geos\|latency]  | geos |
 
 geos example :
 ```yaml
@@ -186,6 +186,7 @@ test:
   type: A
   value: 1.1.1.1
 ```
+> pools define values, rules map geos to pool to define geographical routing (based on [ISO_3166](https://en.wikipedia.org/wiki/ISO_3166-2))
 
 latency example :
 ```yaml
@@ -202,21 +203,22 @@ test:
         - value: 2.2.2.2
           status: obey
     rules:
-     - geos:
-         - NA-US-VA
-       pool: us-east-1
-     - geos:
-         - NA-US-CA
-       pool: us-west-1
+      - geos:
+          - NA-US-VA
+        pool: us-east-1
+      - geos:
+          - NA-US-CA
+        pool: us-west-1
   ttl: 60
   type: A
   value: 1.1.1.1
   octodns:
     route53:
-      mode: latency
+      dynamic_mode: latency
 ```
+> pools name define AWS region used for latency-based strategy (geos definition are used in case of fallback if you change provider)
 
-For select specific AWS region, you should determine the right Geo Codes ([geo_latency_data.py](/octodns_route53/geo_latency_data.py)), be careful Route53 doesn't support multiple entries with same Region, default region (if Geo Codes doesn't match with a region) is `us-east-1`.
+Note : be careful Route53 doesn't support multiple entries with same Region
 
 #### Provider Specific Types
 
