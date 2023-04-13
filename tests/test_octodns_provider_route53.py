@@ -2392,7 +2392,9 @@ class TestRoute53Provider(TestCase):
 
         # empty is empty
         desired = Zone('unit.tests.', [])
-        extra = provider._extra_changes(desired=desired, changes=[])
+        extra = provider._extra_changes(
+            existing=desired, desired=desired, changes=[]
+        )
         self.assertEqual([], extra)
         stubber.assert_no_pending_responses()
 
@@ -2402,13 +2404,17 @@ class TestRoute53Provider(TestCase):
             desired, 'a', {'ttl': 30, 'type': 'A', 'value': '1.2.3.4'}
         )
         desired.add_record(record)
-        extra = provider._extra_changes(desired=desired, changes=[])
+        extra = provider._extra_changes(
+            existing=desired, desired=desired, changes=[]
+        )
         self.assertEqual([], extra)
         stubber.assert_no_pending_responses()
 
         # short-circuit for unknown zone
         other = Zone('other.tests.', [])
-        extra = provider._extra_changes(desired=other, changes=[])
+        extra = provider._extra_changes(
+            existing=desired, desired=other, changes=[]
+        )
         self.assertEqual([], extra)
         stubber.assert_no_pending_responses()
 
@@ -2458,7 +2464,9 @@ class TestRoute53Provider(TestCase):
 
         # empty is empty
         desired = Zone('unit.tests.', [])
-        extra = provider._extra_changes(desired=desired, changes=[])
+        extra = provider._extra_changes(
+            existing=desired, desired=desired, changes=[]
+        )
         self.assertEqual([], extra)
         stubber.assert_no_pending_responses()
 
@@ -2470,7 +2478,9 @@ class TestRoute53Provider(TestCase):
 
         # empty is empty
         desired = Zone('unit2.tests.', [])
-        extra = provider._extra_changes(desired=desired, changes=[])
+        extra = provider._extra_changes(
+            existing=desired, desired=desired, changes=[]
+        )
         self.assertEqual([], extra)
         stubber.assert_no_pending_responses()
 
@@ -2504,7 +2514,9 @@ class TestRoute53Provider(TestCase):
 
         # empty is empty
         desired = Zone('unit.tests.', [])
-        extra = provider._extra_changes(desired=desired, changes=[])
+        extra = provider._extra_changes(
+            existing=desired, desired=desired, changes=[]
+        )
         self.assertEqual([], extra)
         stubber.assert_no_pending_responses()
 
@@ -2721,7 +2733,9 @@ class TestRoute53Provider(TestCase):
             list_resource_record_sets_resp,
             {'HostedZoneId': 'z42'},
         )
-        extra = provider._extra_changes(desired=desired, changes=[])
+        extra = provider._extra_changes(
+            existing=desired, desired=desired, changes=[]
+        )
         self.assertEqual(1, len(extra))
         stubber.assert_no_pending_responses()
 
@@ -2799,12 +2813,16 @@ class TestRoute53Provider(TestCase):
                 'Marker': '',
             },
         )
-        extra = provider._extra_changes(desired=desired, changes=[])
+        extra = provider._extra_changes(
+            existing=desired, desired=desired, changes=[]
+        )
         self.assertEqual(1, len(extra))
         stubber.assert_no_pending_responses()
 
         for change in (Create(record), Update(record, record), Delete(record)):
-            extra = provider._extra_changes(desired=desired, changes=[change])
+            extra = provider._extra_changes(
+                existing=desired, desired=desired, changes=[change]
+            )
             self.assertEqual(0, len(extra))
             stubber.assert_no_pending_responses()
 
@@ -2908,13 +2926,17 @@ class TestRoute53Provider(TestCase):
                 'Marker': '',
             },
         )
-        extra = provider._extra_changes(desired=desired, changes=[])
+        extra = provider._extra_changes(
+            existing=desired, desired=desired, changes=[]
+        )
         self.assertEqual(0, len(extra))
         stubber.assert_no_pending_responses()
 
         # change b/c of healthcheck path
         record._octodns['healthcheck'] = {'path': '/_ready'}
-        extra = provider._extra_changes(desired=desired, changes=[])
+        extra = provider._extra_changes(
+            existing=desired, desired=desired, changes=[]
+        )
         self.assertEqual(1, len(extra))
         stubber.assert_no_pending_responses()
 
@@ -3052,19 +3074,25 @@ class TestRoute53Provider(TestCase):
                 'Marker': '',
             },
         )
-        extra = provider._extra_changes(desired=desired, changes=[])
+        extra = provider._extra_changes(
+            existing=desired, desired=desired, changes=[]
+        )
         self.assertEqual(0, len(extra))
         stubber.assert_no_pending_responses()
 
         # change b/c of healthcheck path
         record._octodns['healthcheck'] = {'path': '/_ready'}
-        extra = provider._extra_changes(desired=desired, changes=[])
+        extra = provider._extra_changes(
+            existing=desired, desired=desired, changes=[]
+        )
         self.assertEqual(1, len(extra))
         stubber.assert_no_pending_responses()
 
         # change b/c of healthcheck host
         record._octodns['healthcheck'] = {'host': 'foo.bar.io'}
-        extra = provider._extra_changes(desired=desired, changes=[])
+        extra = provider._extra_changes(
+            existing=desired, desired=desired, changes=[]
+        )
         self.assertEqual(1, len(extra))
         stubber.assert_no_pending_responses()
 
@@ -3243,19 +3271,25 @@ class TestRoute53Provider(TestCase):
                 'Marker': '',
             },
         )
-        extra = provider._extra_changes(desired=desired, changes=[])
+        extra = provider._extra_changes(
+            existing=desired, desired=desired, changes=[]
+        )
         self.assertEqual(0, len(extra))
         stubber.assert_no_pending_responses()
 
         # change b/c of healthcheck path
         record._octodns['healthcheck'] = {'path': '/_ready'}
-        extra = provider._extra_changes(desired=desired, changes=[])
+        extra = provider._extra_changes(
+            existing=desired, desired=desired, changes=[]
+        )
         self.assertEqual(1, len(extra))
         stubber.assert_no_pending_responses()
 
         # no change b/c healthcheck host ignored for dynamic cname
         record._octodns['healthcheck'] = {'host': 'foo.bar.io'}
-        extra = provider._extra_changes(desired=desired, changes=[])
+        extra = provider._extra_changes(
+            existing=desired, desired=desired, changes=[]
+        )
         self.assertEqual(0, len(extra))
         stubber.assert_no_pending_responses()
 

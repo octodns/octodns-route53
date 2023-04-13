@@ -146,14 +146,40 @@ class _Route53Record(EqualityTupleMixin):
                     )
                 )
 
+        route_53 = record._octodns.get('route53', {})
+        dynamic_mode = route_53.get('dynamic_mode', 'geos')
+
         # Rules
-        for i, rule in enumerate(record.dynamic.rules):
-            pool_name = rule.data['pool']
-            geos = rule.data.get('geos', [])
-            if geos:
-                for geo in geos:
-                    # Create a RRSet for each geo in each rule that uses the
-                    # desired target pool
+        if dynamic_mode == 'latency':
+            for pool_name, pool in record.dynamic.pools.items():
+                ret.add(
+                    _Route53DynamicLatency(
+                        provider, hosted_zone_id, record, pool_name, i, creating
+                    )
+                )
+        else:
+            for i, rule in enumerate(record.dynamic.rules):
+                pool_name = rule.data['pool']
+                geos = rule.data.get('geos', [])
+                if geos:
+                    for geo in geos:
+                        # Create a RRSet for each geo in each rule that uses the
+                        # desired target pool
+                        ret.add(
+                            _Route53DynamicRule(
+                                provider,
+                                hosted_zone_id,
+                                record,
+                                pool_name,
+                                i,
+                                creating,
+                                geo=geo,
+                            )
+                        )
+                else:
+                    # There's no geo's for this rule so it's the catchall that will
+                    # just point things that don't match any geo rules to the
+                    # specified pool
                     ret.add(
                         _Route53DynamicRule(
                             provider,
@@ -162,18 +188,8 @@ class _Route53Record(EqualityTupleMixin):
                             pool_name,
                             i,
                             creating,
-                            geo=geo,
                         )
                     )
-            else:
-                # There's no geo's for this rule so it's the catchall that will
-                # just point things that don't match any geo rules to the
-                # specified pool
-                ret.add(
-                    _Route53DynamicRule(
-                        provider, hosted_zone_id, record, pool_name, i, creating
-                    )
-                )
 
         return ret
 
@@ -481,6 +497,47 @@ class _Route53DynamicRule(_Route53Record):
         return (
             f'_Route53DynamicRule<{self.fqdn} {self._type} {self.index} '
             f'{self.geo} {self.target_dns_name}>'
+        )
+
+
+class _Route53DynamicLatency(_Route53Record):
+    def __init__(
+        self, provider, hosted_zone_id, record, pool_name, index, creating
+    ):
+        super().__init__(provider, record, creating)
+
+        self.hosted_zone_id = hosted_zone_id
+        self.pool_name = pool_name
+        self.index = index
+
+        self.target_dns_name = f'_octodns-{pool_name}-pool.{record.fqdn}'
+
+    @property
+    def identifer(self):
+        return f'{self.index}-{self.pool_name}'
+
+    def mod(self, action, existing_rrsets):
+        rrset = {
+            'AliasTarget': {
+                'DNSName': self.target_dns_name,
+                'EvaluateTargetHealth': True,
+                'HostedZoneId': self.hosted_zone_id,
+            },
+            'Name': self.fqdn,
+            'Region': self.pool_name,
+            'SetIdentifier': self.identifer,
+            'Type': self._type,
+        }
+
+        return {'Action': action, 'ResourceRecordSet': rrset}
+
+    def __hash__(self):
+        return f'{self.fqdn}:{self._type}:{self.identifer}'.__hash__()
+
+    def __repr__(self):
+        return (
+            f'_Route53DynamicLatency<{self.fqdn} {self._type} {self.index} '
+            f'{self.pool_name} {self.target_dns_name}>'
         )
 
 
@@ -1057,6 +1114,11 @@ class Route53Provider(_AuthMixin, BaseProvider):
                     # we'll record
                     if fallback_name != 'default':
                         pools[pool_name]['fallback'] = fallback_name
+            elif 'Region' in rrset:
+                # this is a latency mode record, we don't have any information
+                # about rules so we can't build them up. _include_change will
+                # need to look to see if this is an actual change
+                data['octodns'] = {'route53': {'dynamic_mode': 'latency'}}
             elif 'GeoLocation' in rrset:
                 # These are rules
                 _id = rrset['SetIdentifier']
@@ -1699,7 +1761,8 @@ class Route53Provider(_AuthMixin, BaseProvider):
     def _extra_changes_dynamic_needs_update(self, zone_id, record):
         # OK this is a record we don't have change for that does have dynamic
         # information. We need to look and see if it needs to be updated b/c of
-        # a health check version bump or other mismatch
+        # a health check version bump, a change in dynamic_mode, or other
+        # mismatch
         self.log.debug(
             '_extra_changes_dynamic_needs_update: inspecting=%s, %s',
             record.fqdn,
@@ -1715,12 +1778,20 @@ class Route53Provider(_AuthMixin, BaseProvider):
             for value in pool.data['values']:
                 statuses[value['value']] = value.get('status', 'obey')
 
+        new_dynamic_mode = record._octodns.get('route53', {}).get(
+            'dynamic_mode', 'geos'
+        )
+
         # loop through all the r53 rrsets
+        existing_dynamic_mode = 'geos'
         for rrset in self._load_records(zone_id):
             name = rrset['Name']
             # Break off the first piece of the name, it'll let us figure out if
             # this is an rrset we're interested in.
             maybe_meta, rest = name.split('.', 1)
+
+            if 'Region' in rrset:
+                existing_dynamic_mode = 'latency'
 
             if (
                 not maybe_meta.startswith('_octodns-')
@@ -1745,9 +1816,18 @@ class Route53Provider(_AuthMixin, BaseProvider):
                 )
                 return True
 
+        if new_dynamic_mode != existing_dynamic_mode:
+            # dynamic mode is changing
+            self.log.info(
+                '_extra_changes_dynamic_needs_update: dynamic mode change caused update of %s:%s',
+                record.fqdn,
+                record._type,
+            )
+            return True
+
         return False
 
-    def _extra_changes(self, desired, changes, **kwargs):
+    def _extra_changes(self, existing, desired, changes, **kwargs):
         self.log.debug('_extra_changes: desired=%s', desired.name)
         zone_id = self._get_zone_id(desired.name)
         if not zone_id:
@@ -1763,21 +1843,51 @@ class Route53Provider(_AuthMixin, BaseProvider):
                 # already have a change for it, skipping
                 continue
 
+            existing_record = None
+            for existing_record in existing.records:
+                if (
+                    existing_record._type == record._type
+                    and existing_record.name == record.name
+                ):
+                    break
+
             if getattr(record, 'geo', False):
                 if self._extra_changes_geo_needs_update(zone_id, record):
-                    extras.append(Update(record, record))
+                    extras.append(Update(existing_record, record))
             elif getattr(record, 'dynamic', False):
                 if self._extra_changes_dynamic_needs_update(zone_id, record):
-                    extras.append(Update(record, record))
+                    extras.append(Update(existing_record, record))
 
         return extras
 
     def _include_change(self, change):
-        return not (
-            isinstance(change, Update)
-            and change.new._type == Route53AliasRecord._type
-            and change.new.values == change.existing.values
-        )
+        if isinstance(change, Update):
+            new = change.new
+            existing = change.existing
+
+            if new.dynamic and existing.dynamic:
+                new_dynamic_mode = new._octodns.get('route53', {}).get(
+                    'dynamic_mode', 'geos'
+                )
+                existing_dynamic_mode = existing._octodns.get(
+                    'route53', {}
+                ).get('dynamic_mode', 'geos')
+                if new_dynamic_mode == existing_dynamic_mode:
+                    # check to see if the difference is just in the rules, which we
+                    # couldn't build since we're latency based and don't use/store
+                    # them
+                    new_data = change.new.data
+                    existing_data = change.existing.data
+                    # wipe out the rules so we can compare everything else
+                    new_data['dynamic']['rules'] = []
+                    return new_data != existing_data
+
+            # if it's a r53 alias check its values to see if things really
+            # changed
+            if new._type == Route53AliasRecord._type:
+                return new.values != existing.values
+
+        return True
 
     def _apply(self, plan):
         desired = plan.desired
