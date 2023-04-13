@@ -218,6 +218,9 @@ test:
 ```
 > pools name define AWS region used for latency-based strategy (geos definition are used in case of fallback if you change provider)
 
+This latency his functionality is specific to `Route53Provider`. Other dynamic providers will fall back to using the `rules` section as normal so it a requirement to have a functioning set of rules if you plan to push the config to multiple providers and it is recommended to include one regardless so that you may do so in an emergency. 
+
+In the case of `latency` mode the record's `pools.fallbacks` and `values` section is ignored as Route53 has no such concepts with latency based routing.
 Note : be careful Route53 doesn't support multiple entries with same Region
 
 #### Provider Specific Types
