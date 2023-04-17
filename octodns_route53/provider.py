@@ -1851,12 +1851,15 @@ class Route53Provider(_AuthMixin, BaseProvider):
         # Ensure this batch is ordered (deletes before creates etc.)
         batch.sort(key=_mod_keyer)
         uuid = uuid4().hex
-        batch = {'Comment': f'Change: {uuid}', 'Changes': batch}
-        self.log.debug(
-            '_really_apply:   sending change request, comment=%s',
-            batch['Comment'],
-        )
-        resp = self._conn.change_resource_record_sets(
-            HostedZoneId=zone_id, ChangeBatch=batch
-        )
-        self.log.debug('_really_apply:   change info=%s', resp['ChangeInfo'])
+        change_batch = {'Comment': f'Change: {uuid}', 'Changes': batch}
+        if len(batch) == 0:
+            self.log.debug('_really_apply:   no changes to make')
+        else:
+            self.log.debug(
+                '_really_apply:   sending change request, comment=%s',
+                change_batch['Comment'],
+            )
+            resp = self._conn.change_resource_record_sets(
+                HostedZoneId=zone_id, ChangeBatch=change_batch
+            )
+            self.log.debug('_really_apply:   change info=%s', resp['ChangeInfo'])
