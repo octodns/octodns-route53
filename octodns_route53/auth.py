@@ -2,6 +2,8 @@
 #
 #
 
+import re
+
 from boto3 import client
 from botocore.config import Config
 
@@ -13,6 +15,7 @@ class _AuthMixin:
         access_key_id,
         secret_access_key,
         session_token,
+        role_arn,
         client_max_attempts,
         *args,
         **kwargs,
@@ -25,6 +28,28 @@ class _AuthMixin:
             session_token is not None,
             client_max_attempts,
         )
+
+        if role_arn:
+            self.log.debug('client:   assuming role %s', role_arn)
+            sts_client = self.client(
+                'sts',
+                access_key_id,
+                secret_access_key,
+                session_token,
+                None,
+                client_max_attempts,
+                *args,
+                **kwargs,
+            )
+
+            ident = re.sub(r"[^a-zA-Z0-9_=,.@-]+", "-", self.id)
+
+            credentials = sts_client.assume_role(
+                RoleArn=role_arn, RoleSessionName="octodns-route53-" + ident
+            )
+            access_key_id = credentials['Credentials']['AccessKeyId']
+            secret_access_key = credentials['Credentials']['SecretAccessKey']
+            session_token = credentials['Credentials']['Expiration']
 
         use_fallback_auth = (
             access_key_id is None

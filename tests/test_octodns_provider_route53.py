@@ -580,6 +580,17 @@ class TestRoute53Provider(TestCase):
 
         return (provider, stubber)
 
+    def _get_stubbed_role_provider(self):
+        provider = Route53Provider(
+            'test', 'abc', '123', role_arn="arn:aws:iam:12345:role/foo"
+        )
+
+        # Use the stubber
+        stubber = Stubber(provider._conn)
+        stubber.activate()
+
+        return (provider, stubber)
+
     def test_update_r53_zones(self):
         provider, stubber = self._get_stubbed_provider()
 
@@ -835,6 +846,16 @@ class TestRoute53Provider(TestCase):
         got = Zone('unit.tests.', [])
         with self.assertRaises(ClientError):
             stubber.add_client_error('list_hosted_zones')
+            provider.populate(got)
+
+    # with fallback boto makes an unstubbed call to the 169. metadata api, this
+    # stubs that bit out
+    def test_populate_with_role_acquisition(self):
+        provider, stubber = self._get_stubbed_role_provider()
+
+        got = Zone('unit.tests.', [])
+        with self.assertRaises(ClientError):
+            stubber.add_client_error('assume_role')
             provider.populate(got)
 
     def test_populate(self):

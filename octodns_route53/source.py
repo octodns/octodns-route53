@@ -23,6 +23,7 @@ class Ec2Source(_AuthMixin, BaseSource):
         access_key_id=None,
         secret_access_key=None,
         session_token=None,
+        role_arn=None,
         client_max_attempts=None,
         ttl=3600,
         tag_prefix='octodns',
@@ -48,6 +49,7 @@ class Ec2Source(_AuthMixin, BaseSource):
             access_key_id=access_key_id,
             secret_access_key=secret_access_key,
             session_token=session_token,
+            role_arn=role_arn,
             client_max_attempts=client_max_attempts,
             region_name=region,
         )
@@ -193,6 +195,7 @@ class ElbSource(_AuthMixin, BaseSource):
         access_key_id=None,
         secret_access_key=None,
         session_token=None,
+        role_arn=None,
         client_max_attempts=None,
         ttl=3600,
         tag_prefix='octodns',
@@ -218,6 +221,7 @@ class ElbSource(_AuthMixin, BaseSource):
             access_key_id=access_key_id,
             secret_access_key=secret_access_key,
             session_token=session_token,
+            role_arn=role_arn,
             client_max_attempts=client_max_attempts,
             region_name=region,
         )

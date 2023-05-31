@@ -775,6 +775,7 @@ class Route53Provider(_AuthMixin, BaseProvider):
         max_changes=1000,
         client_max_attempts=None,
         session_token=None,
+        role_arn=None,
         delegation_set_id=None,
         get_zones_by_name=False,
         *args,
@@ -800,6 +801,7 @@ class Route53Provider(_AuthMixin, BaseProvider):
             access_key_id=access_key_id,
             secret_access_key=secret_access_key,
             session_token=session_token,
+            role_arn=role_arn,
             client_max_attempts=client_max_attempts,
         )
 
