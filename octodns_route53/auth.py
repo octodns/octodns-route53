@@ -31,6 +31,8 @@ class _AuthMixin:
 
         if role_arn:
             self.log.debug('client:   assuming role %s', role_arn)
+            # ~recursively call into ourselves to get an STS client with the
+            # auth info provided
             sts_client = self.client(
                 'sts',
                 access_key_id,
@@ -42,11 +44,18 @@ class _AuthMixin:
                 **kwargs,
             )
 
+            # make sure to only uses chars that are allowed in role session
+            # names
             ident = re.sub(r"[^a-zA-Z0-9_=,.@-]+", "-", self.id)
 
+            # assume the specified role with the base auth info
             credentials = sts_client.assume_role(
                 RoleArn=role_arn, RoleSessionName="octodns-route53-" + ident
             )
+
+            # and get new auth info for that role assumption, replacing the
+            # stuff that was passed in and continue on to get the requested
+            # client with the new auth
             access_key_id = credentials['Credentials']['AccessKeyId']
             secret_access_key = credentials['Credentials']['SecretAccessKey']
             session_token = credentials['Credentials']['Expiration']
