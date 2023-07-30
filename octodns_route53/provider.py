@@ -1178,6 +1178,22 @@ class Route53Provider(_AuthMixin, BaseProvider):
 
         return super()._process_desired_zone(desired)
 
+    def list_zones(self):
+        self.log.debug('list_zones:')
+        hosted_zones = []
+        params = {}
+        if self.delegation_set_id:
+            params['DelegationSetId'] = self.delegation_set_id
+        more = True
+        while more:
+            resp = self._conn.list_hosted_zones(**params)
+            hosted_zones.extend([h['Name'] for h in resp['HostedZones']])
+            params['Marker'] = resp.get('NextMarker', None)
+            more = resp['IsTruncated']
+
+        hosted_zones.sort()
+        return hosted_zones
+
     def populate(self, zone, target=False, lenient=False):
         self.log.debug(
             'populate: name=%s, target=%s, lenient=%s',
