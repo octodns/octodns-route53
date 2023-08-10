@@ -1,9 +1,15 @@
 ## v0.0.6 - 2022-??-?? -
 
-* Fixed issue with creating TCP healthchecks for dynamic CNAME records
+### Important
+
+* Adds Provider.list_zones to enable new dynamic zone config functionality
 * Ec2Source added to support dynamically creating records for Ec2 instances
 * ElbSource added to support dynamically creating records for ELBs
 * role_name added to auth mix-in to support acquiring a specific role from existing credentials 
+
+### Misc
+
+* Fixed issue with creating TCP healthchecks for dynamic CNAME records
 
 ## v0.0.5 - 2022-07-14 - Support the root
 

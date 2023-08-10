@@ -889,6 +889,58 @@ class TestRoute53Provider(TestCase):
             ]
         )
 
+    def test_list_zones(self):
+        provider, stubber = self._get_stubbed_provider()
+
+        list_hosted_zones_resp = {
+            'HostedZones': [
+                {'Name': 'unit.tests.', 'Id': 'z42', 'CallerReference': 'abc'},
+                {'Name': 'alpha.com.', 'Id': 'z43', 'CallerReference': 'abd'},
+            ],
+            'Marker': '',
+            'IsTruncated': False,
+            'MaxItems': '100',
+        }
+        stubber.add_response('list_hosted_zones', list_hosted_zones_resp, {})
+        self.assertEqual(['alpha.com.', 'unit.tests.'], provider.list_zones())
+
+    def test_delegated_list_zones(self):
+        provider, stubber = self._get_stubbed_delegation_set_provider()
+
+        list_hosted_zones_resp = {
+            'HostedZones': [
+                {'Name': 'unit.tests.', 'Id': 'z42', 'CallerReference': 'abc'},
+                {'Name': 'alpha.com.', 'Id': 'z43', 'CallerReference': 'abd'},
+            ],
+            'Marker': '',
+            'IsTruncated': True,
+            'NextMarker': 'm',
+            'MaxItems': '100',
+        }
+        stubber.add_response(
+            'list_hosted_zones',
+            list_hosted_zones_resp,
+            {'DelegationSetId': provider.delegation_set_id},
+        )
+        list_hosted_zones_resp = {
+            'HostedZones': [
+                {'Name': 'other.tests.', 'Id': 'z43', 'CallerReference': 'abe'},
+                {'Name': 'beta.com.', 'Id': 'z45', 'CallerReference': 'abf'},
+            ],
+            'Marker': 'm',
+            'IsTruncated': False,
+            'MaxItems': '100',
+        }
+        stubber.add_response(
+            'list_hosted_zones',
+            list_hosted_zones_resp,
+            {'DelegationSetId': provider.delegation_set_id, 'Marker': 'm'},
+        )
+        self.assertEqual(
+            ['alpha.com.', 'beta.com.', 'other.tests.', 'unit.tests.'],
+            provider.list_zones(),
+        )
+
     def test_populate(self):
         provider, stubber = self._get_stubbed_provider()
 
