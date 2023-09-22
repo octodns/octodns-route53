@@ -1,3 +1,9 @@
+## v0.0.7 - 2023-??-?? - 
+
+### Important
+
+* Add `append_to_names` tag append parameter to sources
+
 ## v0.0.6 - 2023-10-16 - Long overdue
 
 ### Important
