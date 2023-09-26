@@ -1234,7 +1234,7 @@ class Route53Provider(_AuthMixin, BaseProvider):
                     else:
                         aliases[record_name].append(rrset)
                     continue
-                if 'TrafficPolicyInstanceId' in rrset:
+                elif 'TrafficPolicyInstanceId' in rrset:
                     self.log.warning('TrafficPolicies are not supported, skipping %s', rrset['Name'])
                     continue
                 # A basic record (potentially including geo)
