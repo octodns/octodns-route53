@@ -1023,6 +1023,12 @@ class TestRoute53Provider(TestCase):
                     'ResourceRecords': [{'Value': '7.2.3.4'}],
                     'TTL': 61,
                 },
+                {
+                    'Name': 'ignored.unit.tests.',
+                    'TrafficPolicyInstanceId': 'foo',
+                    'TTL': 60,
+                    'Type': 'A',
+                },
             ],
             'IsTruncated': True,
             'NextRecordName': 'next_name',
