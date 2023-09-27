@@ -6,6 +6,7 @@
 * Ec2Source added to support dynamically creating records for Ec2 instances
 * ElbSource added to support dynamically creating records for ELBs
 * role_name added to auth mix-in to support acquiring a specific role from existing credentials 
+* Warn and skip records with TrafficPolicyInstanceId as they're not supported
 
 ### Misc
 
