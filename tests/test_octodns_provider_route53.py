@@ -4318,6 +4318,9 @@ class TestRoute53AliasRecord(TestCase):
             v0.data,
         )
 
+        self.assertTrue('evaluate-target-health' in v0.data)
+        self.assertTrue('hosted-zone-id' in v0.data)
+
         self.assertEqual(hash(v0), hash(v0))
         self.assertEqual(hash(v1), hash(v1))
         self.assertNotEqual(hash(v0), hash(v1))

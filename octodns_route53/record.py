@@ -48,19 +48,19 @@ class _Route53AliasValue(EqualityTupleMixin, dict):
 
     @property
     def evaluate_target_health(self):
-        return self['evaluate_target_health']
+        return self['evaluate-target-health']
 
     @evaluate_target_health.setter
     def evaluate_target_health(self, value):
-        self['evaluate_target_health'] = value
+        self['evaluate-target-health'] = value
 
     @property
     def hosted_zone_id(self):
-        return self['hosted_zone_id']
+        return self['hosted-zone-id']
 
     @hosted_zone_id.setter
     def hosted_zone_id(self, value):
-        self['hosted_zone_id'] = value
+        self['hosted-zone-id'] = value
 
     @property
     def data(self):
