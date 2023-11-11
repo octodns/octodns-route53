@@ -6,7 +6,8 @@ from .provider import Route53Provider, Route53ProviderException
 from .record import Route53AliasRecord
 from .source import Ec2Source, ElbSource
 
-__VERSION__ = '0.0.6'
+# TODO: remove __VERSION__ with the next major version release
+__version__ = __VERSION__ = '0.0.6'
 
 # quell warnings
 Ec2Source
