@@ -13,5 +13,18 @@ sections="FUTURE,STDLIB,THIRDPARTY,OCTODNS,FIRSTPARTY,LOCALFOLDER"
 [tool.pytest.ini_options]
 filterwarnings = [
     'error',
+    # env/lib/python3.12/site-packages/botocore/awsrequest.py:22: in <module>
+    #     import botocore.utils
+    # env/lib/python3.12/site-packages/botocore/utils.py:32: in <module>
+    #     import dateutil.parser
+    # env/lib/python3.12/site-packages/dateutil/parser/__init__.py:2: in <module>
+    #     from ._parser import parse, parser, parserinfo, ParserError
+    # env/lib/python3.12/site-packages/dateutil/parser/_parser.py:50: in <module>
+    #     from .. import tz
+    # env/lib/python3.12/site-packages/dateutil/tz/__init__.py:2: in <module>
+    #     from .tz import *
+    # env/lib/python3.12/site-packages/dateutil/tz/tz.py:37: in <module>
+    #     EPOCH = datetime.datetime.utcfromtimestamp(0)
+    'ignore:datetime.datetime.utcfromtimestamp',
 ]
 pythonpath = "."
