@@ -26,5 +26,7 @@ filterwarnings = [
     # env/lib/python3.12/site-packages/dateutil/tz/tz.py:37: in <module>
     #     EPOCH = datetime.datetime.utcfromtimestamp(0)
     'ignore:datetime.datetime.utcfromtimestamp',
+    # pycountry_mappings -> repoze.lru ->
+    'ignore:pkg_resources is deprecated',
 ]
 pythonpath = "."
