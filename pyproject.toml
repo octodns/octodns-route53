@@ -13,6 +13,8 @@ sections="FUTURE,STDLIB,THIRDPARTY,OCTODNS,FIRSTPARTY,LOCALFOLDER"
 [tool.pytest.ini_options]
 filterwarnings = [
     'error',
+    # TODO: remove once octodns 2.0 has been released
+    'ignore:.*DEPRECATED.*2.0',
     # env/lib/python3.12/site-packages/botocore/awsrequest.py:22: in <module>
     #     import botocore.utils
     # env/lib/python3.12/site-packages/botocore/utils.py:32: in <module>
