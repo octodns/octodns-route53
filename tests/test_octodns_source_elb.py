@@ -147,5 +147,31 @@ class TestElbSource(TestCase):
         for record in records.values():
             self.assertEqual('CNAME', record._type)
 
+    def test_append(self):
+        source, stubber = self._get_stubbed_source(append_to_names="local.")
+
+        zone = Zone('unit.tests.local.', [])
+
+        stubber.add_response('describe_load_balancers', self.load_balancers)
+
+        stubber.add_response('describe_tags', self.tags)
+
+        source.populate(zone)
+
+        # Our append string assumes names end with . - no entries for no-dot,
+        # second, or fifth
+        records = {r.name: r for r in zone.records}
+        self.assertEqual('foo.aws.com.', records['service'].value)
+        self.assertEqual('blip.aws.com.', records['first'].value)
+        self.assertEqual('bang.aws.com.', records['both'].value)
+        self.assertEqual('bang.aws.com.', records['fourth'].value)
+        self.assertEqual('bang.aws.com.', records[''].value)
+        self.assertEqual(5, len(records))
+
+        record = records.pop('')
+        self.assertEqual('ALIAS', record._type)
+        for record in records.values():
+            self.assertEqual('CNAME', record._type)
+
     def test_conflicting_fqdns(self):
         pass

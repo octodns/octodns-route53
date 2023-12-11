@@ -179,6 +179,47 @@ class TestEc2Source(TestCase):
         )
         self.assertEqual(2, len(records))
 
+    def test_append(self):
+        source, stubber = self._get_stubbed_source(append_to_names="org.")
+
+        zone = Zone('unit.tests.org.', [])
+        in_addr_arpa = Zone('0.0.10.in-addr.arpa.', [])
+        ip6_arpa = Zone('0.0.c.f.ip6.arpa.', [])
+
+        stubber.add_response(
+            'describe_instances', {'Reservations': self.reservations}
+        )
+        source.populate(zone)
+
+        # Our append string assumes names end with . - no entries for iv4, 2nd,
+        # or 2nd-v6. So expect 3 A and 1 AAAA
+        records = {(r.name, r._type): r for r in zone.records}
+        self.assertEqual(['10.0.0.14'], records[('all', 'A')].values)
+        self.assertEqual(['10.0.1.99'], records[('iv4-other', 'A')].values)
+        self.assertEqual(['10.0.0.16'], records[('v4', 'A')].values)
+        self.assertEqual(['fc00::1'], records[('all', 'AAAA')].values)
+        self.assertEqual(['fc00::2'], records[('v6', 'AAAA')].values)
+        self.assertEqual(5, len(records))
+
+        # expect 3 ipv4 PTRs
+        source.populate(in_addr_arpa)
+        records = {r.name: r for r in in_addr_arpa.records}
+        self.assertEqual('all.unit.tests.org.', records['14'].value)
+        self.assertEqual('iv4.unit.testsorg.', records['15'].value)
+        self.assertEqual(
+            ['2nd.unit.testsorg.', 'v4.unit.tests.org.'], records['16'].values
+        )
+        self.assertEqual(3, len(records))
+
+        # expect 3 ipv6 PTRs
+        source.populate(ip6_arpa)
+        records = {r.name.split('.', 1)[0]: r for r in ip6_arpa.records}
+        self.assertEqual('all.unit.tests.org.', records['1'].value)
+        self.assertEqual(
+            ['2nd-v6.unit.testsorg.', 'v6.unit.tests.org.'], records['2'].values
+        )
+        self.assertEqual(2, len(records))
+
     def test_conflicting_fqdns(self):
         source, stubber = self._get_stubbed_source()
 
