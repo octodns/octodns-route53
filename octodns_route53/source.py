@@ -27,20 +27,23 @@ class Ec2Source(_AuthMixin, BaseSource):
         client_max_attempts=None,
         ttl=3600,
         tag_prefix='octodns',
+        append_to_names="",
         *args,
         **kwargs,
     ):
         self.log = getLogger(f'Ec2Source[{id}]')
         self.log.info(
-            '__init__: id=%s, region=%s, access_key_id=%s, ttl=%d, tag_prefix=%s',
+            '__init__: id=%s, region=%s, access_key_id=%s, ttl=%d, tag_prefix=%s, append_to_names=%s',
             id,
             region,
             access_key_id,
             ttl,
             tag_prefix,
+            append_to_names,
         )
         self.ttl = ttl
         self.tag_prefix = tag_prefix
+        self.append_to_names = append_to_names
 
         super().__init__(id, *args, **kwargs)
 
@@ -69,9 +72,12 @@ class Ec2Source(_AuthMixin, BaseSource):
                         key = tag['Key']
                         val = tag['Value']
                         if key == 'Name':
-                            fqdns.append(val)
+                            fqdns.append(val + self.append_to_names)
                         elif key.startswith(self.tag_prefix):
-                            fqdns.extend(val.split('/'))
+                            fqdns.extend(
+                                fqdn + self.append_to_names
+                                for fqdn in val.split('/')
+                            )
 
                     fqdns = [f'{i}.' if i[-1] != '.' else i for i in fqdns]
                     instances[instance['InstanceId']] = {
@@ -199,20 +205,23 @@ class ElbSource(_AuthMixin, BaseSource):
         client_max_attempts=None,
         ttl=3600,
         tag_prefix='octodns',
+        append_to_names="",
         *args,
         **kwargs,
     ):
         self.log = getLogger(f'ElbSource[{id}]')
         self.log.info(
-            '__init__: id=%s, region=%s, access_key_id=%s, ttl=%d, tag_prefix=%s',
+            '__init__: id=%s, region=%s, access_key_id=%s, ttl=%d, tag_prefix=%s, append_to_names=%s',
             id,
             region,
             access_key_id,
             ttl,
             tag_prefix,
+            append_to_names,
         )
         self.ttl = ttl
         self.tag_prefix = tag_prefix
+        self.append_to_names = append_to_names
 
         super().__init__(id, *args, **kwargs)
 
@@ -238,7 +247,7 @@ class ElbSource(_AuthMixin, BaseSource):
                 arn = lb['LoadBalancerArn']
                 lbs[arn] = {
                     'dns_name': f'{lb["DNSName"]}.',
-                    'fqdns': [lb['LoadBalancerName']],
+                    'fqdns': [lb['LoadBalancerName'] + self.append_to_names],
                 }
 
             # request tags and look through them for fqdns
@@ -252,7 +261,10 @@ class ElbSource(_AuthMixin, BaseSource):
                         key = tag['Key']
                         val = tag['Value']
                         if key.startswith(self.tag_prefix):
-                            lb['fqdns'].extend(val.split('/'))
+                            lb['fqdns'].extend(
+                                fqdn + self.append_to_names
+                                for fqdn in val.split('/')
+                            )
 
             for lb in lbs.values():
                 fqdns = lb['fqdns']

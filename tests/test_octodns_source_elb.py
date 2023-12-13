@@ -12,6 +12,87 @@ from octodns_route53 import ElbSource
 
 
 class TestElbSource(TestCase):
+    load_balancers = {
+        'LoadBalancers': [
+            {
+                # matches name
+                'DNSName': 'foo.aws.com',
+                'LoadBalancerArn': 'arn42',
+                'LoadBalancerName': 'service.unit.tests.',
+            },
+            {
+                # doesn't match
+                'DNSName': 'bar.aws.com',
+                'LoadBalancerArn': 'arn43',
+                'LoadBalancerName': 'this.doesnt.match.',
+            },
+            {
+                # matches, no trailing dot
+                'DNSName': 'baz.aws.com',
+                'LoadBalancerArn': 'arn44',
+                'LoadBalancerName': 'no-dot.unit.tests',
+            },
+            {
+                # name doesn't match, but tags will
+                'DNSName': 'blip.aws.com',
+                'LoadBalancerArn': 'arn45',
+                'LoadBalancerName': 'tags.will.match.',
+            },
+            {
+                # both name and tags match
+                'DNSName': 'bang.aws.com',
+                'LoadBalancerArn': 'arn46',
+                'LoadBalancerName': 'both.unit.tests.',
+            },
+        ]
+    }
+    tags = {
+        'TagDescriptions': [
+            {
+                'ResourceArn': 'arn42',
+                'Tags': [{'Key': 'irrelevant', 'Value': 'doesnt matter'}],
+            },
+            {'ResourceArn': 'arn43'},
+            {'ResourceArn': 'arn44'},
+            {
+                'ResourceArn': 'arn45',
+                'Tags': [
+                    {
+                        'Key': 'octodns',
+                        # multi-value: one matches w/dot. one matches w/o dot, one
+                        # doesn't match
+                        'Value': 'first.unit.tests./second.unit.tests/third.thing.',
+                    }
+                ],
+            },
+            {
+                'ResourceArn': 'arn46',
+                'Tags': [
+                    {
+                        'Key': 'octodns-1',
+                        # matches
+                        'Value': 'fourth.unit.tests.',
+                    },
+                    {
+                        'Key': 'octodns-2',
+                        # matches w/o dot
+                        'Value': 'fifth.unit.tests',
+                    },
+                    {
+                        'Key': 'octodns-2',
+                        # doesn't match
+                        'Value': 'sixth.doesnt.apply.',
+                    },
+                    {
+                        'Key': 'octodns-3',
+                        # apex match
+                        'Value': 'unit.tests.',
+                    },
+                ],
+            },
+        ]
+    }
+
     def _get_stubbed_source(self, **kwargs):
         source = ElbSource('test', 'us-east-1', 'abc', '123', **kwargs)
 
@@ -41,95 +122,9 @@ class TestElbSource(TestCase):
 
         zone = Zone('unit.tests.', [])
 
-        stubber.add_response(
-            'describe_load_balancers',
-            {
-                'LoadBalancers': [
-                    {
-                        # matches name
-                        'DNSName': 'foo.aws.com',
-                        'LoadBalancerArn': 'arn42',
-                        'LoadBalancerName': 'service.unit.tests.',
-                    },
-                    {
-                        # doesn't match
-                        'DNSName': 'bar.aws.com',
-                        'LoadBalancerArn': 'arn43',
-                        'LoadBalancerName': 'this.doesnt.match.',
-                    },
-                    {
-                        # matches, no trailing dot
-                        'DNSName': 'baz.aws.com',
-                        'LoadBalancerArn': 'arn44',
-                        'LoadBalancerName': 'no-dot.unit.tests',
-                    },
-                    {
-                        # name doesn't match, but tags will
-                        'DNSName': 'blip.aws.com',
-                        'LoadBalancerArn': 'arn45',
-                        'LoadBalancerName': 'tags.will.match.',
-                    },
-                    {
-                        # both name and tags match
-                        'DNSName': 'bang.aws.com',
-                        'LoadBalancerArn': 'arn46',
-                        'LoadBalancerName': 'both.unit.tests.',
-                    },
-                ]
-            },
-        )
+        stubber.add_response('describe_load_balancers', self.load_balancers)
 
-        stubber.add_response(
-            'describe_tags',
-            {
-                'TagDescriptions': [
-                    {
-                        'ResourceArn': 'arn42',
-                        'Tags': [
-                            {'Key': 'irrelevant', 'Value': 'doesnt matter'}
-                        ],
-                    },
-                    {'ResourceArn': 'arn43'},
-                    {'ResourceArn': 'arn44'},
-                    {
-                        'ResourceArn': 'arn45',
-                        'Tags': [
-                            {
-                                'Key': 'octodns',
-                                # multi-value: one matches w/dot. one matches w/o dot, one
-                                # doesn't match
-                                'Value': 'first.unit.tests./second.unit.tests/third.thing.',
-                            }
-                        ],
-                    },
-                    {
-                        'ResourceArn': 'arn46',
-                        'Tags': [
-                            {
-                                'Key': 'octodns-1',
-                                # matches
-                                'Value': 'fourth.unit.tests.',
-                            },
-                            {
-                                'Key': 'octodns-2',
-                                # matches w/o dot
-                                'Value': 'fifth.unit.tests',
-                            },
-                            {
-                                'Key': 'octodns-2',
-                                # doesn't match
-                                'Value': 'sixth.doesnt.apply.',
-                            },
-                            {
-                                'Key': 'octodns-3',
-                                # apex match
-                                'Value': 'unit.tests.',
-                            },
-                        ],
-                    },
-                ]
-            },
-        )
+        stubber.add_response('describe_tags', self.tags)
 
         source.populate(zone)
 
@@ -149,6 +144,32 @@ class TestElbSource(TestCase):
         record = records.pop('')
         self.assertEqual('ALIAS', record._type)
         # rest are CNAMEs
+        for record in records.values():
+            self.assertEqual('CNAME', record._type)
+
+    def test_append(self):
+        source, stubber = self._get_stubbed_source(append_to_names="local.")
+
+        zone = Zone('unit.tests.local.', [])
+
+        stubber.add_response('describe_load_balancers', self.load_balancers)
+
+        stubber.add_response('describe_tags', self.tags)
+
+        source.populate(zone)
+
+        # Our append string assumes names end with . - no entries for no-dot,
+        # second, or fifth
+        records = {r.name: r for r in zone.records}
+        self.assertEqual('foo.aws.com.', records['service'].value)
+        self.assertEqual('blip.aws.com.', records['first'].value)
+        self.assertEqual('bang.aws.com.', records['both'].value)
+        self.assertEqual('bang.aws.com.', records['fourth'].value)
+        self.assertEqual('bang.aws.com.', records[''].value)
+        self.assertEqual(5, len(records))
+
+        record = records.pop('')
+        self.assertEqual('ALIAS', record._type)
         for record in records.values():
             self.assertEqual('CNAME', record._type)
 
