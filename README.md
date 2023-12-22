@@ -44,7 +44,7 @@ providers:
     secret_access_key: env/AWS_SECRET_ACCESS_KEY
     # The AWS session token (optional)
     # Only needed if using temporary security credentials
-    #session_token: env/AWS_SESSION_TOKEN
+    # session_token: env/AWS_SESSION_TOKEN
 ```
 
 Alternatively, you may leave out access_key_id, secret_access_key and session_token.  This will result in boto3 deciding authentication dynamically.
@@ -63,10 +63,10 @@ providers:
     # The region in which to look for EC2 instances, required.
     region: us-east-1
     # Prefix for tag keys containing fqdn(s)
-    #tag_prefix: octodns
+    # tag_prefix: octodns
     # String to append to all names and tag values
-    #append_to_names: mydomain.com.
-    #ttl: 3600
+    # append_to_names: mydomain.com.
+    # ttl: 3600
 ```
 
 In general the account used will need read permissions on EC2 instances.
@@ -93,10 +93,10 @@ providers:
     # The region in which to look for ELB instances, required.
     region: us-east-1
     # Prefix for tag keys containing fqdn(s)
-    #tag_prefix: octodns
+    # tag_prefix: octodns
     # String to append to all names and tag values
-    #append_to_names: mydomain.com.
-    #ttl: 3600
+    # append_to_names: mydomain.com.
+    # ttl: 3600
 ```
 
 In general the account used will need read permissions on ELB instances and tags.
