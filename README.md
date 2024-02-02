@@ -148,7 +148,7 @@ zones:
 
 #### Records
 
-A, AAAA, CAA, CNAME, MX, NAPTR, NS, PTR, SPF, SRV, TXT
+A, AAAA, CAA, CNAME, DS, MX, NAPTR, NS, PTR, SPF, SRV, TXT
 
 #### Root NS Records
 

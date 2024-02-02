@@ -312,8 +312,14 @@ class _Route53Record(EqualityTupleMixin):
     def _value_for_SRV(self, value, record):
         return f'{value.priority} {value.weight} {value.port} {value.target}'
 
+    def _value_for_DS(self, value, record):
+        return f'{value.key_tag} {value.algorithm} {value.digest_type} {value.digest}'
+
     def _values_for_SRV(self, record):
         return [self._value_for_SRV(v, record) for v in record.values]
+
+    def _values_for_DS(self, record):
+        return [self._value_for_DS(v, record) for v in record.values]
 
 
 class _Route53Alias(_Route53Record):
@@ -752,6 +758,7 @@ class Route53Provider(_AuthMixin, BaseProvider):
             'AAAA',
             'CAA',
             'CNAME',
+            'DS',
             'MX',
             'NAPTR',
             'NS',
@@ -992,6 +999,27 @@ class Route53Provider(_AuthMixin, BaseProvider):
                     'weight': weight,
                     'port': port,
                     'target': target,
+                }
+            )
+        return {
+            'type': rrset['Type'],
+            'values': values,
+            'ttl': int(rrset['TTL']),
+        }
+
+    def _data_for_DS(self, rrset):
+        values = []
+        for rr in rrset['ResourceRecords']:
+            # digest may contain whitespace
+            key_tag, algorithm, digest_type, digest = rr['Value'].split(
+                maxsplit=3
+            )
+            values.append(
+                {
+                    'key_tag': key_tag,
+                    'algorithm': algorithm,
+                    'digest_type': digest_type,
+                    'digest': digest,
                 }
             )
         return {
