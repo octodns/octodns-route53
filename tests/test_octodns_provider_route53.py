@@ -405,6 +405,21 @@ class TestRoute53Provider(TestCase):
             },
         ),
         (
+            'dskey',
+            {
+                'ttl': 70,
+                'type': 'DS',
+                'values': [
+                    {
+                        'key_tag': 60485,
+                        'algorithm': 5,
+                        'digest_type': 1,
+                        'digest': '2BB183AF5F22588179A53B0A 98631FAD1A292118',
+                    }
+                ],
+            },
+        ),
+        (
             'alias',
             {
                 'ttl': 942942942,
@@ -1115,6 +1130,16 @@ class TestRoute53Provider(TestCase):
                     'TTL': 69,
                 },
                 {
+                    'Name': 'dskey.unit.tests.',
+                    'Type': 'DS',
+                    'ResourceRecords': [
+                        {
+                            'Value': '60485 5 1 2BB183AF5F22588179A53B0A 98631FAD1A292118'
+                        }
+                    ],
+                    'TTL': 70,
+                },
+                {
                     'AliasTarget': {
                         'HostedZoneId': 'Z119WBBTVP5WFX',
                         'EvaluateTargetHealth': False,
@@ -1243,7 +1268,7 @@ class TestRoute53Provider(TestCase):
         )
 
         plan = provider.plan(self.expected)
-        self.assertEqual(12, len(plan.changes))
+        self.assertEqual(13, len(plan.changes))
         self.assertTrue(plan.exists)
         for change in plan.changes:
             self.assertIsInstance(change, Create)
@@ -1270,7 +1295,7 @@ class TestRoute53Provider(TestCase):
             {'HostedZoneId': 'z42', 'ChangeBatch': ANY},
         )
 
-        self.assertEqual(12, provider.apply(plan))
+        self.assertEqual(13, provider.apply(plan))
         stubber.assert_no_pending_responses()
 
         # Delete by monkey patching in a populate that includes an extra record
@@ -1536,7 +1561,7 @@ class TestRoute53Provider(TestCase):
         stubber.add_response('list_hosted_zones', list_hosted_zones_resp, {})
 
         plan = provider.plan(self.expected)
-        self.assertEqual(12, len(plan.changes))
+        self.assertEqual(13, len(plan.changes))
         self.assertFalse(plan.exists)
         for change in plan.changes:
             self.assertIsInstance(change, Create)
@@ -1608,7 +1633,7 @@ class TestRoute53Provider(TestCase):
             {'HostedZoneId': 'z42', 'ChangeBatch': ANY},
         )
 
-        self.assertEqual(12, provider.apply(plan))
+        self.assertEqual(13, provider.apply(plan))
         stubber.assert_no_pending_responses()
 
     def test_sync_create_with_delegation_set(self):
@@ -1625,7 +1650,7 @@ class TestRoute53Provider(TestCase):
         stubber.add_response('list_hosted_zones', list_hosted_zones_resp, {})
 
         plan = provider.plan(self.expected)
-        self.assertEqual(12, len(plan.changes))
+        self.assertEqual(13, len(plan.changes))
         self.assertFalse(plan.exists)
         for change in plan.changes:
             self.assertIsInstance(change, Create)
@@ -1701,7 +1726,7 @@ class TestRoute53Provider(TestCase):
             {'HostedZoneId': 'z42', 'ChangeBatch': ANY},
         )
 
-        self.assertEqual(12, provider.apply(plan))
+        self.assertEqual(13, provider.apply(plan))
         stubber.assert_no_pending_responses()
 
     def test_health_checks_pagination(self):
@@ -2641,7 +2666,7 @@ class TestRoute53Provider(TestCase):
         )
 
         plan = provider.plan(self.expected)
-        self.assertEqual(12, len(plan.changes))
+        self.assertEqual(13, len(plan.changes))
 
         create_hosted_zone_resp = {
             'HostedZone': {
@@ -2709,7 +2734,7 @@ class TestRoute53Provider(TestCase):
             {'HostedZoneId': 'z42', 'ChangeBatch': ANY},
         )
 
-        self.assertEqual(12, provider.apply(plan))
+        self.assertEqual(13, provider.apply(plan))
         stubber.assert_no_pending_responses()
 
     def test_plan_apply_with_get_zones_by_name_zone_exists(self):
@@ -2760,7 +2785,7 @@ class TestRoute53Provider(TestCase):
         )
 
         plan = provider.plan(self.expected)
-        self.assertEqual(13, len(plan.changes))
+        self.assertEqual(14, len(plan.changes))
 
         stubber.add_response(
             'list_health_checks',
@@ -2784,7 +2809,7 @@ class TestRoute53Provider(TestCase):
             {'HostedZoneId': 'z42', 'ChangeBatch': ANY},
         )
 
-        self.assertEqual(13, provider.apply(plan))
+        self.assertEqual(14, provider.apply(plan))
         stubber.assert_no_pending_responses()
 
     def test_extra_change_no_health_check(self):
@@ -3450,7 +3475,7 @@ class TestRoute53Provider(TestCase):
     @patch('octodns_route53.Route53Provider._really_apply')
     def test_apply_1(self, really_apply_mock, _):
         # 18 RRs with max of 19 should only get applied in one call
-        provider, plan = self._get_test_plan(19)
+        provider, plan = self._get_test_plan(20)
         provider.apply(plan)
         really_apply_mock.assert_called_once()
 
@@ -3468,7 +3493,7 @@ class TestRoute53Provider(TestCase):
         # with a max of seven modifications, three calls
         provider, plan = self._get_test_plan(7)
         provider.apply(plan)
-        self.assertEqual(3, really_apply_mock.call_count)
+        self.assertEqual(4, really_apply_mock.call_count)
 
     @patch('octodns_route53.Route53Provider._load_records')
     @patch('octodns_route53.Route53Provider._really_apply')
