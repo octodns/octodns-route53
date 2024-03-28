@@ -58,7 +58,7 @@ class _AuthMixin:
             # client with the new auth
             access_key_id = credentials['Credentials']['AccessKeyId']
             secret_access_key = credentials['Credentials']['SecretAccessKey']
-            session_token = credentials['Credentials']['Expiration']
+            session_token = credentials['Credentials']['SessionToken']
 
         use_fallback_auth = (
             access_key_id is None
