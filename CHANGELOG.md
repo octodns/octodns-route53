@@ -4,6 +4,7 @@
 
 * Add `append_to_names` tag append parameter to sources
 * Add `DS` record type support
+* Updated role authentication to use the correct session token value
 
 ## v0.0.6 - 2023-10-16 - Long overdue
 
