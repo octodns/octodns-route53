@@ -861,6 +861,7 @@ class TestRoute53Provider(TestCase):
                     'AccessKeyId': 42,
                     'SecretAccessKey': 43,
                     'Expiration': 44,
+                    'SessionToken': 45,
                 }
             }
         ]
@@ -896,7 +897,7 @@ class TestRoute53Provider(TestCase):
                     service_name='route53',
                     aws_access_key_id=42,
                     aws_secret_access_key=43,
-                    aws_session_token=44,
+                    aws_session_token=45,
                     config=None,
                 ),
             ]
