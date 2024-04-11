@@ -1,4 +1,4 @@
-## v0.0.7 - 2023-??-?? - 
+## v0.0.7 - 2024-04-11 - Helps if you use the actual Session token
 
 ### Important
 
