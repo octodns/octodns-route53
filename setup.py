@@ -49,6 +49,9 @@ setup(
         'boto3>=1.20.26',
         'octodns>=0.9.18',
         'pycountry-convert>=0.7.2',
+        # boto requires specific urllib3 versions in older pythons, once we're
+        # done with 3.10 this can likely go away
+        'urllib3<=2.0.0',
     ),
     license='MIT',
     long_description=long_description,
