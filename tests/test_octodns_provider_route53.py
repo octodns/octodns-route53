@@ -401,7 +401,11 @@ class TestRoute53Provider(TestCase):
             {
                 'ttl': 69,
                 'type': 'CAA',
-                'value': {'flags': 0, 'tag': 'issue', 'value': 'ca.unit.tests; cansignhttpexchanges=yes'},
+                'value': {
+                    'flags': 0,
+                    'tag': 'issue',
+                    'value': 'ca.unit.tests; cansignhttpexchanges=yes',
+                },
             },
         ),
         (
@@ -1125,7 +1129,11 @@ class TestRoute53Provider(TestCase):
                 {
                     'Name': 'unit.tests.',
                     'Type': 'CAA',
-                    'ResourceRecords': [{'Value': '0 issue "ca.unit.tests; cansignhttpexchanges=yes"'}],
+                    'ResourceRecords': [
+                        {
+                            'Value': '0 issue "ca.unit.tests; cansignhttpexchanges=yes"'
+                        }
+                    ],
                     'TTL': 69,
                 },
                 {
