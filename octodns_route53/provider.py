@@ -913,7 +913,7 @@ class Route53Provider(_AuthMixin, BaseProvider):
     def _data_for_CAA(self, rrset):
         values = []
         for rr in rrset['ResourceRecords']:
-            flags, tag, value = rr['Value'].split()
+            flags, tag, value = rr['Value'].split(' ', 2)
             values.append({'flags': flags, 'tag': tag, 'value': value[1:-1]})
         return {
             'type': rrset['Type'],
