@@ -8,6 +8,7 @@ from unittest.mock import Mock, call, patch
 from botocore.exceptions import ClientError
 from botocore.stub import ANY, Stubber
 
+from octodns.provider import SupportsException
 from octodns.record import Create, Delete, Record, Update
 from octodns.zone import Zone
 
@@ -841,6 +842,37 @@ class TestRoute53Provider(TestCase):
             ['EU', 'NA-US-OR'], dynamic.dynamic.rules[0].data['geos']
         )
         self.assertFalse('geos' in dynamic.dynamic.rules[1].data)
+
+        # unsupported healthcheck protocol
+        desired = Zone('unit.tests.', [])
+        record = Record.new(
+            desired,
+            'a',
+            {
+                'ttl': 30,
+                'type': 'A',
+                'value': '1.2.3.4',
+                'dynamic': {
+                    'pools': {
+                        'one': {'values': [{'value': '1.2.3.4'}]},
+                        'two': {'values': [{'value': '2.2.3.4'}]},
+                    },
+                    'rules': [
+                        {'geos': ['EU', 'NA-CA-NB', 'NA-US-OR'], 'pool': 'two'},
+                        {'pool': 'one'},
+                    ],
+                },
+                'octodns': {'healthcheck': {'protocol': 'ICMP'}},
+            },
+            lenient=True,
+        )
+        desired.add_record(record)
+        with self.assertRaises(SupportsException) as ctx:
+            provider._process_desired_zone(desired)
+        self.assertEqual(
+            'test: healthcheck protocol "ICMP" not supported',
+            str(ctx.exception),
+        )
 
     # with fallback boto makes an unstubbed call to the 169. metadata api, this
     # stubs that bit out

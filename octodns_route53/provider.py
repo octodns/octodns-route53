@@ -12,7 +12,7 @@ from uuid import uuid4
 from pycountry_convert import country_alpha2_to_continent_code
 
 from octodns.equality import EqualityTupleMixin
-from octodns.provider import ProviderException
+from octodns.provider import ProviderException, SupportsException
 from octodns.provider.base import BaseProvider
 from octodns.record import Create, Record, Update
 from octodns.record.geo import GeoCodes
@@ -1170,6 +1170,12 @@ class Route53Provider(_AuthMixin, BaseProvider):
     def _process_desired_zone(self, desired):
         for record in desired.records:
             if getattr(record, 'dynamic', False):
+                protocol = record.healthcheck_protocol
+                if protocol not in ('HTTP', 'HTTPS', 'TCP'):
+                    msg = f'healthcheck protocol "{protocol}" not supported'
+                    # no workable fallbacks so straight error
+                    raise SupportsException(f'{self.id}: {msg}')
+
                 # Make a copy of the record in case we have to muck with it
                 dynamic = record.dynamic
                 rules = []
