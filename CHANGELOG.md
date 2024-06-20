@@ -1,6 +1,7 @@
 ## v0.0.? - 2024-??-?? - 
 
 * Fix CAA rdata parsing to allow values with tags
+* Validate that healthcheck protocol is supported (HTTP, HTTPS, TCP)
 
 ## v0.0.7 - 2024-04-11 - Helps if you use the actual Session token
 
