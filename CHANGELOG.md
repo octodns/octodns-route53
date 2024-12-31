@@ -1,4 +1,14 @@
-## v0.0.? - 2024-??-?? - 
+## v1.0.0 - 2024-??-?? - ???
+
+### Notedworthy Changes:
+
+* `geo` record support removed, records should be migrated to `dynamic` before
+  upgrading.
+* `SPF` record support removed, records should be migrated to `TXT` before
+  upgrading.
+* Requires octoDNS >= 1.5.0
+
+### Other Changes:
 
 * Fix CAA rdata parsing to allow values with tags
 * Validate that healthcheck protocol is supported (HTTP, HTTPS, TCP)
