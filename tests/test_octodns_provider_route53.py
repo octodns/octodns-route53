@@ -1,7 +1,6 @@
 #
 #
 #
-
 from unittest import TestCase
 from unittest.mock import Mock, call, patch
 
@@ -20,15 +19,13 @@ from octodns_route53.provider import (
     _octal_replace,
     _Route53Alias,
     _Route53DynamicValue,
-    _Route53GeoDefault,
-    _Route53GeoRecord,
     _Route53Record,
 )
 from octodns_route53.record import Route53AliasRecord, _Route53AliasValue
 
 
-class GeoProvider(object):
-    SUPPORTS_GEO = True
+class SimpleProvider(object):
+    SUPPORTS_GEO = False
     SUPPORTS_DYNAMIC = False
     id = 'test'
 
@@ -340,10 +337,22 @@ class TestRoute53Provider(TestCase):
                 'ttl': 61,
                 'type': 'A',
                 'values': ['2.2.3.4', '3.2.3.4'],
-                'geo': {
-                    'AF': ['4.2.3.4'],
-                    'NA-US': ['5.2.3.4', '6.2.3.4'],
-                    'NA-US-CA': ['7.2.3.4'],
+                'dynamic': {
+                    'pools': {
+                        'AF': {'values': [{'value': '4.2.3.4'}]},
+                        'NA-US': {
+                            'values': [
+                                {'value': '5.2.3.4'},
+                                {'value': '6.2.3.4'},
+                            ]
+                        },
+                        'NA-US-CA': {'values': [{'value': '7.2.3.4'}]},
+                    },
+                    'rules': [
+                        {'pool': 'AF', 'geos': ['AF']},
+                        {'pool': 'NA-US-CA', 'geos': ['NA-US-CA', 'NA-US-OR']},
+                        {'pool': 'NA-US'},
+                    ],
                 },
             },
         ),
@@ -506,6 +515,25 @@ class TestRoute53Provider(TestCase):
                 'Type': 'HTTPS',
                 'FullyQualifiedDomainName': 'unit.tests',
                 'IPAddress': '5.2.3.4',
+                'ResourcePath': '/_dns',
+                'Type': 'HTTPS',
+                'Port': 443,
+                'MeasureLatency': True,
+                'RequestInterval': 10,
+                'FailureThreshold': 6,
+            },
+            'HealthCheckVersion': 2,
+        },
+        {
+            'Id': '93',
+            'CallerReference': caller_ref,
+            'HealthCheckConfig': {
+                'Disabled': False,
+                'EnableSNI': True,
+                'Inverted': False,
+                'Type': 'HTTPS',
+                'FullyQualifiedDomainName': 'unit.tests',
+                'IPAddress': '6.2.3.4',
                 'ResourcePath': '/_dns',
                 'Type': 'HTTPS',
                 'Port': 443,
@@ -1039,38 +1067,10 @@ class TestRoute53Provider(TestCase):
                 {
                     'Name': 'unit.tests.',
                     'Type': 'A',
-                    'GeoLocation': {'CountryCode': '*'},
                     'ResourceRecords': [
                         {'Value': '2.2.3.4'},
                         {'Value': '3.2.3.4'},
                     ],
-                    'TTL': 61,
-                },
-                {
-                    'Name': 'unit.tests.',
-                    'Type': 'A',
-                    'GeoLocation': {'ContinentCode': 'AF'},
-                    'ResourceRecords': [{'Value': '4.2.3.4'}],
-                    'TTL': 61,
-                },
-                {
-                    'Name': 'unit.tests.',
-                    'Type': 'A',
-                    'GeoLocation': {'CountryCode': 'US'},
-                    'ResourceRecords': [
-                        {'Value': '5.2.3.4'},
-                        {'Value': '6.2.3.4'},
-                    ],
-                    'TTL': 61,
-                },
-                {
-                    'Name': 'unit.tests.',
-                    'Type': 'A',
-                    'GeoLocation': {
-                        'CountryCode': 'US',
-                        'SubdivisionCode': 'CA',
-                    },
-                    'ResourceRecords': [{'Value': '7.2.3.4'}],
                     'TTL': 61,
                 },
                 {
@@ -1145,7 +1145,6 @@ class TestRoute53Provider(TestCase):
                 {
                     'Name': 'sub.unit.tests.',
                     'Type': 'NS',
-                    'GeoLocation': {'ContinentCode': 'AF'},
                     'ResourceRecords': [
                         {'Value': '5.2.3.4.'},
                         {'Value': '6.2.3.4.'},
@@ -1223,7 +1222,7 @@ class TestRoute53Provider(TestCase):
         # Load everything
         provider.populate(got)
         # Make sure we got what we expected
-        changes = self.expected.changes(got, GeoProvider())
+        changes = self.expected.changes(got, SimpleProvider())
         self.assertEqual(0, len(changes))
         stubber.assert_no_pending_responses()
 
@@ -1279,7 +1278,7 @@ class TestRoute53Provider(TestCase):
         # Load everything
         provider.populate(got)
         # Make sure we got what we expected
-        changes = expected.changes(got, GeoProvider())
+        changes = expected.changes(got, SimpleProvider())
         self.assertEqual(0, len(changes))
         stubber.assert_no_pending_responses()
 
@@ -1380,209 +1379,6 @@ class TestRoute53Provider(TestCase):
         plan = provider.plan(self.expected)
         self.assertEqual(1, len(plan.changes))
         self.assertIsInstance(plan.changes[0], Delete)
-        self.assertEqual(1, provider.apply(plan))
-        stubber.assert_no_pending_responses()
-
-        # Update by monkey patching in a populate that modifies the A record
-        # with geos
-        def mod_geo_populate(existing, target, lenient):
-            for record in self.expected.records:
-                if record._type != 'A' or not record.geo:
-                    existing.add_record(record)
-            record = Record.new(
-                existing,
-                '',
-                {
-                    'ttl': 61,
-                    'type': 'A',
-                    'values': ['8.2.3.4', '3.2.3.4'],
-                    'geo': {
-                        'AF': ['4.2.3.4'],
-                        'NA-US': ['5.2.3.4', '6.2.3.4'],
-                        'NA-US-KY': ['7.2.3.4'],
-                    },
-                },
-            )
-            existing.add_record(record)
-
-        provider.populate = mod_geo_populate
-        change_resource_record_sets_params = {
-            'ChangeBatch': {
-                'Changes': [
-                    {
-                        'Action': 'DELETE',
-                        'ResourceRecordSet': {
-                            'GeoLocation': {
-                                'CountryCode': 'US',
-                                'SubdivisionCode': 'KY',
-                            },
-                            'HealthCheckId': u'44',
-                            'Name': 'unit.tests.',
-                            'ResourceRecords': [{'Value': '7.2.3.4'}],
-                            'SetIdentifier': 'NA-US-KY',
-                            'TTL': 61,
-                            'Type': 'A',
-                        },
-                    },
-                    {
-                        'Action': 'UPSERT',
-                        'ResourceRecordSet': {
-                            'GeoLocation': {'ContinentCode': 'AF'},
-                            'Name': 'unit.tests.',
-                            'HealthCheckId': u'42',
-                            'ResourceRecords': [{'Value': '4.2.3.4'}],
-                            'SetIdentifier': 'AF',
-                            'TTL': 61,
-                            'Type': 'A',
-                        },
-                    },
-                    {
-                        'Action': 'UPSERT',
-                        'ResourceRecordSet': {
-                            'GeoLocation': {'CountryCode': 'US'},
-                            'HealthCheckId': u'43',
-                            'Name': 'unit.tests.',
-                            'ResourceRecords': [
-                                {'Value': '5.2.3.4'},
-                                {'Value': '6.2.3.4'},
-                            ],
-                            'SetIdentifier': 'NA-US',
-                            'TTL': 61,
-                            'Type': 'A',
-                        },
-                    },
-                    {
-                        'Action': 'CREATE',
-                        'ResourceRecordSet': {
-                            'GeoLocation': {
-                                'CountryCode': 'US',
-                                'SubdivisionCode': 'CA',
-                            },
-                            'HealthCheckId': u'44',
-                            'Name': 'unit.tests.',
-                            'ResourceRecords': [{'Value': '7.2.3.4'}],
-                            'SetIdentifier': 'NA-US-CA',
-                            'TTL': 61,
-                            'Type': 'A',
-                        },
-                    },
-                    {
-                        'Action': 'UPSERT',
-                        'ResourceRecordSet': {
-                            'GeoLocation': {'CountryCode': '*'},
-                            'Name': 'unit.tests.',
-                            'ResourceRecords': [
-                                {'Value': '2.2.3.4'},
-                                {'Value': '3.2.3.4'},
-                            ],
-                            'SetIdentifier': 'default',
-                            'TTL': 61,
-                            'Type': 'A',
-                        },
-                    },
-                ],
-                'Comment': ANY,
-            },
-            'HostedZoneId': 'z42',
-        }
-        stubber.add_response(
-            'change_resource_record_sets',
-            {
-                'ChangeInfo': {
-                    'Id': 'id',
-                    'Status': 'PENDING',
-                    'SubmittedAt': '2017-01-29T01:02:03Z',
-                }
-            },
-            change_resource_record_sets_params,
-        )
-        plan = provider.plan(self.expected)
-        self.assertEqual(1, len(plan.changes))
-        self.assertIsInstance(plan.changes[0], Update)
-        self.assertEqual(1, provider.apply(plan))
-        stubber.assert_no_pending_responses()
-
-        # Update converting to non-geo by monkey patching in a populate that
-        # modifies the A record with geos
-        def mod_add_geo_populate(existing, target, lenient):
-            for record in self.expected.records:
-                if record._type != 'A' or record.geo:
-                    existing.add_record(record)
-            record = Record.new(
-                existing,
-                'simple',
-                {
-                    'ttl': 61,
-                    'type': 'A',
-                    'values': ['1.2.3.4', '2.2.3.4'],
-                    'geo': {'OC': ['3.2.3.4', '4.2.3.4']},
-                },
-            )
-            existing.add_record(record)
-
-        provider.populate = mod_add_geo_populate
-        change_resource_record_sets_params = {
-            'ChangeBatch': {
-                'Changes': [
-                    {
-                        'Action': 'DELETE',
-                        'ResourceRecordSet': {
-                            'GeoLocation': {'ContinentCode': 'OC'},
-                            'Name': 'simple.unit.tests.',
-                            'ResourceRecords': [
-                                {'Value': '3.2.3.4'},
-                                {'Value': '4.2.3.4'},
-                            ],
-                            'SetIdentifier': 'OC',
-                            'TTL': 61,
-                            'Type': 'A',
-                        },
-                    },
-                    {
-                        'Action': 'DELETE',
-                        'ResourceRecordSet': {
-                            'GeoLocation': {'CountryCode': '*'},
-                            'Name': 'simple.unit.tests.',
-                            'ResourceRecords': [
-                                {'Value': '1.2.3.4'},
-                                {'Value': '2.2.3.4'},
-                            ],
-                            'SetIdentifier': 'default',
-                            'TTL': 61,
-                            'Type': 'A',
-                        },
-                    },
-                    {
-                        'Action': 'CREATE',
-                        'ResourceRecordSet': {
-                            'Name': 'simple.unit.tests.',
-                            'ResourceRecords': [
-                                {'Value': '1.2.3.4'},
-                                {'Value': '2.2.3.4'},
-                            ],
-                            'TTL': 60,
-                            'Type': 'A',
-                        },
-                    },
-                ],
-                'Comment': ANY,
-            },
-            'HostedZoneId': 'z42',
-        }
-        stubber.add_response(
-            'change_resource_record_sets',
-            {
-                'ChangeInfo': {
-                    'Id': 'id',
-                    'Status': 'PENDING',
-                    'SubmittedAt': '2017-01-29T01:02:03Z',
-                }
-            },
-            change_resource_record_sets_params,
-        )
-        plan = provider.plan(self.expected)
-        self.assertEqual(1, len(plan.changes))
-        self.assertIsInstance(plan.changes[0], Update)
         self.assertEqual(1, provider.apply(plan))
         stubber.assert_no_pending_responses()
 
@@ -1773,25 +1569,6 @@ class TestRoute53Provider(TestCase):
 
         health_checks_p1 = [
             {
-                'Id': '42',
-                'CallerReference': self.caller_ref,
-                'HealthCheckConfig': {
-                    'Disabled': False,
-                    'EnableSNI': True,
-                    'Inverted': False,
-                    'Type': 'HTTPS',
-                    'FullyQualifiedDomainName': 'unit.tests',
-                    'IPAddress': '4.2.3.4',
-                    'ResourcePath': '/_dns',
-                    'Type': 'HTTPS',
-                    'Port': 443,
-                    'MeasureLatency': True,
-                    'RequestInterval': 10,
-                    'FailureThreshold': 6,
-                },
-                'HealthCheckVersion': 2,
-            },
-            {
                 'Id': '43',
                 'CallerReference': 'abc123',
                 'HealthCheckConfig': {
@@ -1809,7 +1586,7 @@ class TestRoute53Provider(TestCase):
                     'FailureThreshold': 6,
                 },
                 'HealthCheckVersion': 2,
-            },
+            }
         ]
         stubber.add_response(
             'list_health_checks',
@@ -1855,26 +1632,8 @@ class TestRoute53Provider(TestCase):
         )
 
         health_checks = provider.health_checks
-        self.assertEqual(
-            {'42': health_checks_p1[0], '44': health_checks_p2[0]},
-            health_checks,
-        )
+        self.assertEqual({'44': health_checks_p2[0]}, health_checks)
         stubber.assert_no_pending_responses()
-
-        # get without create
-        record = Record.new(
-            self.expected,
-            '',
-            {
-                'ttl': 61,
-                'type': 'A',
-                'values': ['2.2.3.4', '3.2.3.4'],
-                'geo': {'AF': ['4.2.3.4']},
-            },
-        )
-        value = record.geo['AF'].values[0]
-        id = provider.get_health_check_id(record, value, 'obey', True)
-        self.assertEqual('42', id)
 
     def test_health_check_status_support(self):
         provider, stubber = self._get_stubbed_provider()
@@ -2102,7 +1861,10 @@ class TestRoute53Provider(TestCase):
                 'ttl': 61,
                 'type': 'A',
                 'values': ['2.2.3.4', '3.2.3.4'],
-                'geo': {'AF': ['4.2.3.4']},
+                'dynamic': {
+                    'pools': {'AF': {'values': [{'value': '4.2.3.4'}]}},
+                    'rules': [{'pool': 'AF'}],
+                },
                 'octodns': {
                     'healthcheck': {
                         'host': 'foo.bar.com',
@@ -2115,7 +1877,7 @@ class TestRoute53Provider(TestCase):
         )
 
         # if not allowed to create returns none
-        value = record.geo['AF'].values[0]
+        value = record.dynamic.pools['AF'].data['values'][0]['value']
         id = provider.get_health_check_id(record, value, 'obey', False)
         self.assertFalse(id)
 
@@ -2124,7 +1886,7 @@ class TestRoute53Provider(TestCase):
         self.assertEqual('42', id)
 
         # when allowed to create and when host is None
-        record._octodns['healthcheck']['host'] = None
+        record.octodns['healthcheck']['host'] = None
         id = provider.get_health_check_id(record, value, 'obey', True)
         self.assertEqual('43', id)
         stubber.assert_no_pending_responses()
@@ -2194,7 +1956,7 @@ class TestRoute53Provider(TestCase):
         )
         stubber.add_response('change_tags_for_resource', {})
 
-        record._octodns['healthcheck']['protocol'] = 'TCP'
+        record.octodns['healthcheck']['protocol'] = 'TCP'
         id = provider.get_health_check_id(
             record, 'target-1.unit.tests.', 'obey', True
         )
@@ -2363,7 +2125,10 @@ class TestRoute53Provider(TestCase):
                 'ttl': 61,
                 'type': 'A',
                 'value': '2.2.3.4',
-                'geo': {'AF': ['1.2.3.4']},
+                'dynamic': {
+                    'pools': {'AF': {'values': [{'value': '1.2.3.4'}]}},
+                    'rules': [{'pool': 'AF'}],
+                },
                 'octodns': {
                     'healthcheck': {},
                     'route53': {
@@ -2377,7 +2142,7 @@ class TestRoute53Provider(TestCase):
             },
         )
 
-        value = record.geo['AF'].values[0]
+        value = record.dynamic.pools['AF'].data['values'][0]['value']
         id = provider.get_health_check_id(record, value, 'obey', True)
         ml = provider.health_checks[id]['HealthCheckConfig']['MeasureLatency']
         ri = provider.health_checks[id]['HealthCheckConfig']['RequestInterval']
@@ -2404,15 +2169,26 @@ class TestRoute53Provider(TestCase):
                 'ttl': 61,
                 'type': 'A',
                 'values': ['2.2.3.4', '3.2.3.4'],
-                'geo': {
-                    'AF': ['4.2.3.4'],
-                    'NA-US': ['5.2.3.4', '6.2.3.4'],
-                    # removed one geo
+                'dynamic': {
+                    'pools': {
+                        'AF': {'values': [{'value': '4.2.3.4'}]},
+                        'NA-US': {
+                            'values': [
+                                {'value': '5.2.3.4'},
+                                {'value': '6.2.3.4'},
+                            ]
+                        },
+                    },
+                    'rules': [
+                        {'pool': 'AF', 'geos': ['AF']},
+                        {'pool': 'NA-US'},
+                    ],
                 },
             },
         )
 
         # gc no longer in_use records (directly)
+        stubber.add_response('delete_health_check', {}, {'HealthCheckId': '93'})
         stubber.add_response('delete_health_check', {}, {'HealthCheckId': '44'})
         provider._gc_health_checks(
             record, [DummyR53Record('42'), DummyR53Record('43')]
@@ -2432,8 +2208,9 @@ class TestRoute53Provider(TestCase):
         provider._mod_Create(change, 'z43', [])
         stubber.assert_no_pending_responses()
 
-        # gc through _mod_Delete, expect 3 to go away, can't check order
+        # gc through _mod_Delete, expect 4 to go away, can't check order
         # b/c it's not deterministic
+        stubber.add_response('delete_health_check', {}, {'HealthCheckId': ANY})
         stubber.add_response('delete_health_check', {}, {'HealthCheckId': ANY})
         stubber.add_response('delete_health_check', {}, {'HealthCheckId': ANY})
         stubber.add_response('delete_health_check', {}, {'HealthCheckId': ANY})
@@ -2533,16 +2310,7 @@ class TestRoute53Provider(TestCase):
         record = Record.new(
             self.expected,
             '',
-            {
-                'ttl': 61,
-                'type': 'A',
-                'values': ['2.2.3.4', '3.2.3.4'],
-                'geo': {
-                    'AF': ['4.2.3.4'],
-                    'NA-US': ['5.2.3.4', '6.2.3.4'],
-                    'NA-US-CA': ['7.2.3.4'],
-                },
-            },
+            {'ttl': 61, 'type': 'A', 'values': ['2.2.3.4', '3.2.3.4']},
         )
 
         # Expect to delete the legacy hc for our record, but not touch the new
@@ -2550,6 +2318,7 @@ class TestRoute53Provider(TestCase):
         stubber.add_response('delete_health_check', {}, {'HealthCheckId': '43'})
 
         provider._gc_health_checks(record, [DummyR53Record('42')])
+        stubber.assert_no_pending_responses()
 
     def test_no_extra_changes(self):
         provider, stubber = self._get_stubbed_provider()
@@ -2860,7 +2629,7 @@ class TestRoute53Provider(TestCase):
         }
         stubber.add_response('list_hosted_zones', list_hosted_zones_resp, {})
 
-        # record with geo and no health check returns change
+        # record with dyanmic and no health check returns change
         desired = Zone('unit.tests.', [])
         record = Record.new(
             desired,
@@ -2869,19 +2638,49 @@ class TestRoute53Provider(TestCase):
                 'ttl': 30,
                 'type': 'A',
                 'value': '1.2.3.4',
-                'geo': {'NA': ['2.2.3.4']},
+                'dynamic': {
+                    'pools': {'NA': {'values': [{'value': '2.2.3.4'}]}},
+                    'rules': [{'pool': 'NA'}],
+                },
             },
         )
         desired.add_record(record)
         list_resource_record_sets_resp = {
             'ResourceRecordSets': [
                 {
-                    'Name': 'a.unit.tests.',
+                    'Name': '_octodns-default-pool.a.unit.tests.',
                     'Type': 'A',
-                    'GeoLocation': {'ContinentCode': 'NA'},
+                    'ResourceRecords': [{'Value': '1.2.3.4'}],
+                    'TTL': 61,
+                },
+                {
+                    'Name': '_octodns-na-value.a.unit.tests.',
+                    'Type': 'A',
                     'ResourceRecords': [{'Value': '2.2.3.4'}],
                     'TTL': 61,
-                }
+                },
+                {
+                    'AliasTarget': {
+                        'DNSName': '_octodns-default-pool.a.unit.tests.',
+                        'EvaluateTargetHealth': True,
+                        'HostedZoneId': 'Z2',
+                    },
+                    'Failover': 'SECONDARY',
+                    'Name': '_octodns-na-pool.unit.tests.',
+                    'SetIdentifier': 'us-na-Secondary-default',
+                    'Type': 'A',
+                },
+                {
+                    'AliasTarget': {
+                        'DNSName': '_octodns-na-value.a.unit.tests.',
+                        'EvaluateTargetHealth': True,
+                        'HostedZoneId': 'Z2',
+                    },
+                    'Failover': 'PRIMARY',
+                    'Name': '_octodns-na-pool.unit.tests.',
+                    'SetIdentifier': 'us-na-Primary',
+                    'Type': 'A',
+                },
             ],
             'IsTruncated': False,
             'MaxItems': '100',
@@ -2908,7 +2707,7 @@ class TestRoute53Provider(TestCase):
         }
         stubber.add_response('list_hosted_zones', list_hosted_zones_resp, {})
 
-        # record with geo and no health check returns change
+        # record with dyanmix and no health check returns change
         desired = Zone('unit.tests.', [])
         record = Record.new(
             desired,
@@ -2917,20 +2716,50 @@ class TestRoute53Provider(TestCase):
                 'ttl': 30,
                 'type': 'A',
                 'value': '1.2.3.4',
-                'geo': {'NA': ['2.2.3.4']},
+                'dynamic': {
+                    'pools': {'NA': {'values': [{'value': '2.2.3.4'}]}},
+                    'rules': [{'pool': 'NA'}],
+                },
             },
         )
         desired.add_record(record)
         list_resource_record_sets_resp = {
             'ResourceRecordSets': [
                 {
-                    'Name': 'a.unit.tests.',
+                    'Name': '_octodns-default-pool.a.unit.tests.',
                     'Type': 'A',
-                    'GeoLocation': {'ContinentCode': 'NA'},
+                    'ResourceRecords': [{'Value': '1.2.3.4'}],
+                    'TTL': 61,
+                },
+                {
+                    'Name': '_octodns-na-value.a.unit.tests.',
+                    'Type': 'A',
                     'ResourceRecords': [{'Value': '2.2.3.4'}],
                     'TTL': 61,
                     'HealthCheckId': '42',
-                }
+                },
+                {
+                    'AliasTarget': {
+                        'DNSName': '_octodns-default-pool.a.unit.tests.',
+                        'EvaluateTargetHealth': True,
+                        'HostedZoneId': 'Z2',
+                    },
+                    'Failover': 'SECONDARY',
+                    'Name': '_octodns-na-pool.unit.tests.',
+                    'SetIdentifier': 'us-na-Secondary-default',
+                    'Type': 'A',
+                },
+                {
+                    'AliasTarget': {
+                        'DNSName': '_octodns-na-value.a.unit.tests.',
+                        'EvaluateTargetHealth': True,
+                        'HostedZoneId': 'Z2',
+                    },
+                    'Failover': 'PRIMARY',
+                    'Name': '_octodns-na-pool.unit.tests.',
+                    'SetIdentifier': 'us-na-Primary',
+                    'Type': 'A',
+                },
             ],
             'IsTruncated': False,
             'MaxItems': '100',
@@ -2952,7 +2781,7 @@ class TestRoute53Provider(TestCase):
                             'EnableSNI': True,
                             'Inverted': False,
                             'Type': 'HTTPS',
-                            'FullyQualifiedDomainName': 'unit.tests',
+                            'FullyQualifiedDomainName': 'a.unit.tests',
                             'IPAddress': '2.2.3.4',
                             'ResourcePath': '/_dns',
                             'Type': 'HTTPS',
@@ -3000,45 +2829,49 @@ class TestRoute53Provider(TestCase):
                 'ttl': 30,
                 'type': 'A',
                 'value': '1.2.3.4',
-                'geo': {'NA': ['2.2.3.4']},
+                'dynamic': {
+                    'pools': {'NA': {'values': [{'value': '2.2.3.4'}]}},
+                    'rules': [{'pool': 'NA'}],
+                },
             },
         )
         desired.add_record(record)
         list_resource_record_sets_resp = {
             'ResourceRecordSets': [
                 {
-                    # other name
-                    'Name': 'unit.tests.',
+                    'Name': '_octodns-default-pool.a.unit.tests.',
                     'Type': 'A',
-                    'GeoLocation': {'CountryCode': '*'},
                     'ResourceRecords': [{'Value': '1.2.3.4'}],
                     'TTL': 61,
                 },
                 {
-                    # matching name, other type
-                    'Name': 'a.unit.tests.',
-                    'Type': 'AAAA',
-                    'ResourceRecords': [
-                        {'Value': '2001:0db8:3c4d:0015:0000:0000:1a2f:1a4b'}
-                    ],
-                    'TTL': 61,
-                },
-                {
-                    # default geo
-                    'Name': 'a.unit.tests.',
+                    'Name': '_octodns-na-value.a.unit.tests.',
                     'Type': 'A',
-                    'GeoLocation': {'CountryCode': '*'},
-                    'ResourceRecords': [{'Value': '1.2.3.4'}],
-                    'TTL': 61,
-                },
-                {
-                    # match w/correct geo
-                    'Name': 'a.unit.tests.',
-                    'Type': 'A',
-                    'GeoLocation': {'ContinentCode': 'NA'},
                     'ResourceRecords': [{'Value': '2.2.3.4'}],
                     'TTL': 61,
                     'HealthCheckId': '42',
+                },
+                {
+                    'AliasTarget': {
+                        'DNSName': '_octodns-default-pool.a.unit.tests.',
+                        'EvaluateTargetHealth': True,
+                        'HostedZoneId': 'Z2',
+                    },
+                    'Failover': 'SECONDARY',
+                    'Name': '_octodns-na-pool.unit.tests.',
+                    'SetIdentifier': 'us-na-Secondary-default',
+                    'Type': 'A',
+                },
+                {
+                    'AliasTarget': {
+                        'DNSName': '_octodns-na-value.a.unit.tests.',
+                        'EvaluateTargetHealth': True,
+                        'HostedZoneId': 'Z2',
+                    },
+                    'Failover': 'PRIMARY',
+                    'Name': '_octodns-na-pool.unit.tests.',
+                    'SetIdentifier': 'us-na-Primary',
+                    'Type': 'A',
                 },
             ],
             'IsTruncated': False,
@@ -3083,7 +2916,7 @@ class TestRoute53Provider(TestCase):
         stubber.assert_no_pending_responses()
 
         # change b/c of healthcheck path
-        record._octodns['healthcheck'] = {'path': '/_ready'}
+        record.octodns['healthcheck'] = {'path': '/_ready'}
         extra = provider._extra_changes(desired=desired, changes=[])
         self.assertEqual(1, len(extra))
         stubber.assert_no_pending_responses()
@@ -3227,13 +3060,13 @@ class TestRoute53Provider(TestCase):
         stubber.assert_no_pending_responses()
 
         # change b/c of healthcheck path
-        record._octodns['healthcheck'] = {'path': '/_ready'}
+        record.octodns['healthcheck'] = {'path': '/_ready'}
         extra = provider._extra_changes(desired=desired, changes=[])
         self.assertEqual(1, len(extra))
         stubber.assert_no_pending_responses()
 
         # change b/c of healthcheck host
-        record._octodns['healthcheck'] = {'host': 'foo.bar.io'}
+        record.octodns['healthcheck'] = {'host': 'foo.bar.io'}
         extra = provider._extra_changes(desired=desired, changes=[])
         self.assertEqual(1, len(extra))
         stubber.assert_no_pending_responses()
@@ -3418,13 +3251,13 @@ class TestRoute53Provider(TestCase):
         stubber.assert_no_pending_responses()
 
         # change b/c of healthcheck path
-        record._octodns['healthcheck'] = {'path': '/_ready'}
+        record.octodns['healthcheck'] = {'path': '/_ready'}
         extra = provider._extra_changes(desired=desired, changes=[])
         self.assertEqual(1, len(extra))
         stubber.assert_no_pending_responses()
 
         # no change b/c healthcheck host ignored for dynamic cname
-        record._octodns['healthcheck'] = {'host': 'foo.bar.io'}
+        record.octodns['healthcheck'] = {'host': 'foo.bar.io'}
         extra = provider._extra_changes(desired=desired, changes=[])
         self.assertEqual(0, len(extra))
         stubber.assert_no_pending_responses()
@@ -3638,6 +3471,41 @@ class TestRoute53Provider(TestCase):
             [r.data for r in record.dynamic.rules],
         )
 
+    def test_mod_Update_set_math(self):
+        provider = Route53Provider('test', 'abc', '123')
+
+        def stub(*args, **kwargs):
+            pass
+
+        provider._gc_health_checks = stub
+
+        a = Record.new(
+            self.expected,
+            '',
+            {'ttl': 61, 'type': 'A', 'values': ['2.2.3.4', '3.2.3.4']},
+        )
+        b = Record.new(
+            self.expected,
+            '',
+            {'ttl': 62, 'type': 'TXT', 'values': ['Hello World!']},
+        )
+
+        # same record so won't hit new or delete cases
+        change = Update(a, a)
+        ret = provider._mod_Update(change, 'z42', None)
+        self.assertEqual(1, len(ret))
+        self.assertEqual('UPSERT', ret[0]['Action'])
+
+        # will hit the new and delete cases since they records won't be set
+        # equivilent, we're kinda abusing things here since they're completely
+        # different record types
+        change = Update(a, b)
+        ret = provider._mod_Update(change, 'z42', None)
+        self.assertEqual(2, len(ret))
+        # delete before create
+        self.assertEqual('DELETE', ret[0]['Action'])
+        self.assertEqual('CREATE', ret[1]['Action'])
+
 
 class DummyProvider(object):
     def get_health_check_id(self, *args, **kwargs):
@@ -3647,17 +3515,7 @@ class DummyProvider(object):
 class TestRoute53Records(TestCase):
     existing = Zone('unit.tests.', [])
     record_a = Record.new(
-        existing,
-        '',
-        {
-            'geo': {
-                'NA-US': ['2.2.2.2', '3.3.3.3'],
-                'OC': ['4.4.4.4', '5.5.5.5'],
-            },
-            'ttl': 99,
-            'type': 'A',
-            'values': ['9.9.9.9'],
-        },
+        existing, '', {'ttl': 99, 'type': 'A', 'values': ['9.9.9.9']}
     )
 
     def test_value_fors(self):
@@ -3731,29 +3589,17 @@ class TestRoute53Records(TestCase):
         self.assertNotEqual(a, c)
 
         # Same everything, different class is not the same
-        e = _Route53GeoDefault(None, self.record_a, False)
+        alias = Route53AliasRecord(
+            self.existing,
+            '',
+            {'values': [{'name': 'something', 'type': 'A'}], 'ttl': 99},
+        )
+        e = _Route53Alias(None, 'z42', alias, alias.values[0], True)
         self.assertNotEqual(a, e)
-
-        provider = DummyProvider()
-        f = _Route53GeoRecord(
-            provider, self.record_a, 'NA-US', self.record_a.geo['NA-US'], False
-        )
-        self.assertEqual(f, f)
-        g = _Route53GeoRecord(
-            provider, self.record_a, 'OC', self.record_a.geo['OC'], False
-        )
-        self.assertEqual(g, g)
-
-        # Geo and non-geo are not the same, using Geo as primary to get it's
-        # __cmp__
-        self.assertNotEqual(f, a)
-        # Same everything, different geo's is not the same
-        self.assertNotEqual(f, g)
 
         # Make sure it doesn't blow up
         a.__repr__()
         e.__repr__()
-        f.__repr__()
 
     def test_route53_record_ordering(self):
         # Matches
@@ -3775,39 +3621,25 @@ class TestRoute53Records(TestCase):
         self.assertTrue(a > fqdn)
         self.assertTrue(a >= fqdn)
 
-        provider = DummyProvider()
-        geo_a = _Route53GeoRecord(
-            provider, self.record_a, 'NA-US', self.record_a.geo['NA-US'], False
-        )
-        geo_b = _Route53GeoRecord(
-            provider, self.record_a, 'NA-US', self.record_a.geo['NA-US'], False
-        )
-        self.assertTrue(geo_a == geo_b)
-        self.assertFalse(geo_a != geo_b)
-        self.assertFalse(geo_a < geo_b)
-        self.assertTrue(geo_a <= geo_b)
-        self.assertFalse(geo_a > geo_b)
-        self.assertTrue(geo_a >= geo_b)
-
-        # Other base
-        geo_fqdn = _Route53GeoRecord(
-            provider, self.record_a, 'NA-US', self.record_a.geo['NA-US'], False
-        )
-        geo_fqdn.fqdn = 'other'
-        self.assertFalse(geo_a == geo_fqdn)
-        self.assertTrue(geo_a != geo_fqdn)
-        self.assertFalse(geo_a < geo_fqdn)
-        self.assertFalse(geo_a <= geo_fqdn)
-        self.assertTrue(geo_a > geo_fqdn)
-        self.assertTrue(geo_a >= geo_fqdn)
-
         # Other class
-        self.assertFalse(a == geo_a)
-        self.assertTrue(a != geo_a)
-        self.assertFalse(a < geo_a)
-        self.assertFalse(a <= geo_a)
-        self.assertTrue(a > geo_a)
-        self.assertTrue(a >= geo_a)
+        alias = Route53AliasRecord(
+            zone,
+            'alias',
+            {
+                'values': [
+                    {'name': 'something', 'type': 'A'},
+                    {'name': None, 'type': 'AAAA'},
+                ],
+                'ttl': 42,
+            },
+        )
+        alias = _Route53Alias(None, 'z42', alias, alias.values[0], True)
+        self.assertFalse(a == alias)
+        self.assertTrue(a != alias)
+        self.assertFalse(a < alias)
+        self.assertFalse(a <= alias)
+        self.assertTrue(a > alias)
+        self.assertTrue(a >= alias)
 
     def test_dynamic_value_delete(self):
         provider = DummyProvider()
@@ -3829,45 +3661,6 @@ class TestRoute53Records(TestCase):
             # Empty, will test no SetIdentifier
             {},
             # Non-matching
-            {'SetIdentifier': 'not-a-match'},
-            # Same set-id, different name
-            {'Name': 'not-a-match', 'SetIdentifier': 'x12346z'},
-            rrset,
-        ]
-
-        # Provide a matching rrset so that we'll just use it for the delete
-        # rathr than building up an almost identical one, note the way we'll
-        # know that we got the one we passed in is that it'll have a
-        # HealthCheckId and one that was created wouldn't since DummyProvider
-        # stubs out the lookup for them
-        mod = geo.mod('DELETE', candidates)
-        self.assertEqual('x12346z', mod['ResourceRecordSet']['HealthCheckId'])
-
-        # If we don't provide the candidate rrsets we get back exactly what we
-        # put in minus the healthcheck
-        del rrset['HealthCheckId']
-        mod = geo.mod('DELETE', [])
-        self.assertEqual(rrset, mod['ResourceRecordSet'])
-
-    def test_geo_delete(self):
-        provider = DummyProvider()
-        geo = _Route53GeoRecord(
-            provider, self.record_a, 'NA-US', self.record_a.geo['NA-US'], False
-        )
-
-        rrset = {
-            'GeoLocation': {'CountryCode': 'US'},
-            'HealthCheckId': 'x12346z',
-            'Name': 'unit.tests.',
-            'ResourceRecords': [{'Value': '2.2.2.2'}, {'Value': '3.3.3.3'}],
-            'SetIdentifier': 'NA-US',
-            'TTL': 99,
-            'Type': 'A',
-        }
-
-        candidates = [
-            # Empty, will test no SetIdentifier
-            {},
             {'SetIdentifier': 'not-a-match'},
             # Same set-id, different name
             {'Name': 'not-a-match', 'SetIdentifier': 'x12346z'},

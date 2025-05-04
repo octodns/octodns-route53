@@ -178,25 +178,12 @@ class _Route53Record(EqualityTupleMixin):
         return ret
 
     @classmethod
-    def _new_geo(cls, provider, record, creating):
-        # Creates the RRSets that correspond to the given geo record
-        ret = set()
-
-        ret.add(_Route53GeoDefault(provider, record, creating))
-        for ident, geo in record.geo.items():
-            ret.add(_Route53GeoRecord(provider, record, ident, geo, creating))
-
-        return ret
-
-    @classmethod
     def new(cls, provider, record, hosted_zone_id, creating):
         # Creates the RRSets that correspond to the given record
 
         if getattr(record, 'dynamic', False):
             ret = cls._new_dynamic(provider, record, hosted_zone_id, creating)
             return ret
-        elif getattr(record, 'geo', False):
-            return cls._new_geo(provider, record, creating)
         elif record._type == Route53AliasRecord._type:
             return cls._new_route53_alias(
                 provider, record, hosted_zone_id, creating
@@ -247,8 +234,7 @@ class _Route53Record(EqualityTupleMixin):
 
     def __repr__(self):
         return (
-            '_Route53Record<{self.fqdn} {self._type} {self.ttl} '
-            f'{self.values}>'
+            f'_Route53Record<{self.fqdn} {self._type} {self.ttl} {self.values}>'
         )
 
     def _value_convert_value(self, value, record):
@@ -361,8 +347,7 @@ class _Route53Alias(_Route53Record):
 
     def __repr__(self):
         return (
-            f'_Route53Alias<{self.fqdn} {self.target_type} '
-            f'{self.target_name}>'
+            f'_Route53Alias<{self.fqdn} {self.target_type} {self.target_name}>'
         )
 
 
@@ -422,10 +407,7 @@ class _Route53DynamicPool(_Route53Record):
         return f'{self.fqdn}:{self._type}:{self.identifer}'.__hash__()
 
     def __repr__(self):
-        return (
-            f'_Route53DynamicPool<{self.fqdn} {self._type} {self.mode} '
-            f'{self.target_dns_name}>'
-        )
+        return f'_Route53DynamicPool<{self.fqdn} {self._type} {self.mode} {self.target_dns_name}>'
 
 
 class _Route53DynamicRule(_Route53Record):
@@ -484,10 +466,7 @@ class _Route53DynamicRule(_Route53Record):
         return f'{self.fqdn}:{self._type}:{self.identifer}'.__hash__()
 
     def __repr__(self):
-        return (
-            f'_Route53DynamicRule<{self.fqdn} {self._type} {self.index} '
-            f'{self.geo} {self.target_dns_name}>'
-        )
+        return f'_Route53DynamicRule<{self.fqdn} {self._type} {self.index} {self.geo} {self.target_dns_name}>'
 
 
 class _Route53DynamicValue(_Route53Record):
@@ -555,97 +534,7 @@ class _Route53DynamicValue(_Route53Record):
         return f'{self.fqdn}:{self._type}:{self.identifer}'.__hash__()
 
     def __repr__(self):
-        return (
-            f'_Route53DynamicValue<{self.fqdn} {self._type} '
-            f'{self.identifer} {self.value}>'
-        )
-
-
-class _Route53GeoDefault(_Route53Record):
-    def mod(self, action, existing_rrsets):
-        return {
-            'Action': action,
-            'ResourceRecordSet': {
-                'Name': self.fqdn,
-                'GeoLocation': {'CountryCode': '*'},
-                'ResourceRecords': [{'Value': v} for v in self.values],
-                'SetIdentifier': 'default',
-                'TTL': self.ttl,
-                'Type': self._type,
-            },
-        }
-
-    def __hash__(self):
-        return f'{self.fqdn}:{self._type}:default'.__hash__()
-
-    def __repr__(self):
-        return (
-            f'_Route53GeoDefault<{self.fqdn} {self._type} {self.ttl} '
-            f'{self.values}>'
-        )
-
-
-class _Route53GeoRecord(_Route53Record):
-    def __init__(self, provider, record, ident, geo, creating):
-        super().__init__(provider, record, creating)
-        self.geo = geo
-
-        value = geo.values[0]
-        self.health_check_id = provider.get_health_check_id(
-            record, value, 'obey', creating
-        )
-
-    def mod(self, action, existing_rrsets):
-        geo = self.geo
-        set_identifier = geo.code
-        fqdn = self.fqdn
-
-        if action == 'DELETE':
-            # When deleting records try and find the original rrset so that
-            # we're 100% sure to have the complete & accurate data (this mostly
-            # ensures we have the right health check id when there's multiple
-            # potential matches)
-            for existing in existing_rrsets:
-                if fqdn == existing.get(
-                    'Name'
-                ) and set_identifier == existing.get('SetIdentifier', None):
-                    return {'Action': action, 'ResourceRecordSet': existing}
-
-        rrset = {
-            'Name': self.fqdn,
-            'GeoLocation': {'CountryCode': '*'},
-            'ResourceRecords': [{'Value': v} for v in geo.values],
-            'SetIdentifier': set_identifier,
-            'TTL': self.ttl,
-            'Type': self._type,
-        }
-
-        if self.health_check_id:
-            rrset['HealthCheckId'] = self.health_check_id
-
-        if geo.subdivision_code:
-            rrset['GeoLocation'] = {
-                'CountryCode': geo.country_code,
-                'SubdivisionCode': geo.subdivision_code,
-            }
-        elif geo.country_code:
-            rrset['GeoLocation'] = {'CountryCode': geo.country_code}
-        else:
-            rrset['GeoLocation'] = {'ContinentCode': geo.continent_code}
-
-        return {'Action': action, 'ResourceRecordSet': rrset}
-
-    def __hash__(self):
-        return f'{self.fqdn}:{self._type}:{self.geo.code}'.__hash__()
-
-    def _equality_tuple(self):
-        return super()._equality_tuple() + (self.geo.code,)
-
-    def __repr__(self):
-        return (
-            f'_Route53GeoRecord<{self.fqdn} {self._type} {self.ttl} '
-            f'{self.geo.code} {self.values}>'
-        )
+        return f'_Route53DynamicValue<{self.fqdn} {self._type} {self.identifer} {self.value}>'
 
 
 class Route53ProviderException(ProviderException):
@@ -877,11 +766,7 @@ class Route53Provider(_AuthMixin, BaseProvider):
         return id
 
     def _parse_geo(self, rrset):
-        try:
-            loc = rrset['GeoLocation']
-        except KeyError:
-            # No geo loc
-            return
+        loc = rrset['GeoLocation']
         try:
             return loc['ContinentCode']
         except KeyError:
@@ -896,19 +781,14 @@ class Route53Provider(_AuthMixin, BaseProvider):
             except KeyError:
                 return f'{cn}-{cc}'
 
-    def _data_for_geo(self, rrset):
-        ret = {
+    def _data_for_A(self, rrset):
+        return {
             'type': rrset['Type'],
             'values': [v['Value'] for v in rrset['ResourceRecords']],
             'ttl': int(rrset['TTL']),
         }
-        geo = self._parse_geo(rrset)
-        if geo:
-            ret['geo'] = geo
-        return ret
 
-    _data_for_A = _data_for_geo
-    _data_for_AAAA = _data_for_geo
+    _data_for_AAAA = _data_for_A
 
     def _data_for_CAA(self, rrset):
         values = []
@@ -1287,22 +1167,10 @@ class Route53Provider(_AuthMixin, BaseProvider):
                     )
                     zone.add_record(record, lenient=lenient)
 
-            # Convert the basic (potentially with geo) rrsets to records
+            # Convert the basic rrsets to records
             for name, types in records.items():
                 for _type, data in types.items():
-                    if len(data) > 1:
-                        # Multiple data indicates a record with GeoDNS, convert
-                        # them data into the format we need
-                        geo = {}
-                        for d in data:
-                            try:
-                                geo[d['geo']] = d['values']
-                            except KeyError:
-                                primary = d
-                        data = primary
-                        data['geo'] = geo
-                    else:
-                        data = data[0]
+                    data = data[0]
                     record = Record.new(
                         zone, name, data, source=self, lenient=lenient
                     )
@@ -1364,14 +1232,14 @@ class Route53Provider(_AuthMixin, BaseProvider):
 
     def _healthcheck_measure_latency(self, record):
         return (
-            record._octodns.get('route53', {})
+            record.octodns.get('route53', {})
             .get('healthcheck', {})
             .get('measure_latency', True)
         )
 
     def _healthcheck_request_interval(self, record):
         interval = (
-            record._octodns.get('route53', {})
+            record.octodns.get('route53', {})
             .get('healthcheck', {})
             .get('request_interval', 10)
         )
@@ -1385,7 +1253,7 @@ class Route53Provider(_AuthMixin, BaseProvider):
 
     def _healthcheck_failure_threshold(self, record):
         threshold = (
-            record._octodns.get('route53', {})
+            record.octodns.get('route53', {})
             .get('healthcheck', {})
             .get('failure_threshold', 6)
         )
@@ -1722,38 +1590,6 @@ class Route53Provider(_AuthMixin, BaseProvider):
         )
         return True
 
-    def _extra_changes_geo_needs_update(self, zone_id, record):
-        # OK this is a record we don't have change for that does have geo
-        # information. We need to look and see if it needs to be updated b/c of
-        # a health check version bump or other mismatch
-        self.log.debug(
-            '_extra_changes_geo_needs_update: inspecting=%s, %s',
-            record.fqdn,
-            record._type,
-        )
-
-        fqdn = record.fqdn
-
-        # loop through all the r53 rrsets
-        for rrset in self._load_records(zone_id):
-            if (
-                fqdn == rrset['Name']
-                and record._type == rrset['Type']
-                and rrset.get('GeoLocation', {}).get('CountryCode', False)
-                != '*'
-                and self._extra_changes_update_needed(record, rrset)
-            ):
-                # no good, doesn't have the right health check, needs an update
-                self.log.info(
-                    '_extra_changes_geo_needs_update: health-check '
-                    'caused update of %s:%s',
-                    record.fqdn,
-                    record._type,
-                )
-                return True
-
-        return False
-
     def _extra_changes_dynamic_needs_update(self, zone_id, record):
         # OK this is a record we don't have change for that does have dynamic
         # information. We need to look and see if it needs to be updated b/c of
@@ -1821,10 +1657,7 @@ class Route53Provider(_AuthMixin, BaseProvider):
                 # already have a change for it, skipping
                 continue
 
-            if getattr(record, 'geo', False):
-                if self._extra_changes_geo_needs_update(zone_id, record):
-                    extras.append(Update(record, record))
-            elif getattr(record, 'dynamic', False):
+            if getattr(record, 'dynamic', False):
                 if self._extra_changes_dynamic_needs_update(zone_id, record):
                     extras.append(Update(record, record))
 
