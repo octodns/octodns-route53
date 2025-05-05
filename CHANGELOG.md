@@ -1,4 +1,4 @@
-## v1.0.1 - 2025-05-?? - Only clamp when forced
+## v1.0.1 - 2025-05-05 - Only clamp when forced
 
 * Don't clamp urllib3 unless we're on 3.8 or 3.9 where it's actually needed
 
