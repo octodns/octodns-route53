@@ -48,7 +48,7 @@ setup(
         'pycountry-convert>=0.7.2',
         # boto requires specific urllib3 versions in older pythons, once we're
         # done with 3.10 this can likely go away
-        'urllib3<=2.0.0',
+        'urllib3<=2.0.0; python_version<="3.9"',
     ),
     license='MIT',
     long_description=long_description,

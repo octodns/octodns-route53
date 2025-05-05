@@ -1,3 +1,7 @@
+## v1.0.1 - 2025-05-?? - Only clamp when forced
+
+* Don't clamp urllib3 unless we're on 3.8 or 3.9 where it's actually needed
+
 ## v1.0.0 - 2025-05-04 - Long overdue 1.0
 
 ### Notedworthy Changes:
