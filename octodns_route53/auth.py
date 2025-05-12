@@ -82,7 +82,7 @@ class _AuthMixin:
         if profile is not None:
             session_kwargs['profile_name'] = profile
 
-        if use_fallback_auth:
+        if not use_fallback_auth:
             session_kwargs['aws_access_key_id'] = access_key_id
             session_kwargs['aws_secret_access_key'] = secret_access_key
             session_kwargs['aws_session_token'] = session_token
@@ -90,8 +90,5 @@ class _AuthMixin:
         session = Session(**session_kwargs)
 
         return session.client(
-            *args,
-            service_name=service_name,
-            config=config,
-            **kwargs,
+            *args, service_name=service_name, config=config, **kwargs
         )
