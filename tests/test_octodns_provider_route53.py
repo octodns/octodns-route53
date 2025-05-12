@@ -914,8 +914,19 @@ class TestRoute53Provider(TestCase):
             stubber.add_client_error('list_hosted_zones')
             provider.populate(got)
 
-    @patch('octodns_route53.auth.client')
-    def test_populate_with_role_acquisition(self, client_mock):
+    @patch('octodns_route53.auth.Session')
+    def test_leverage_named_profile(self, session_cls_mock):
+        session_mock = Mock()
+        session_mock.client.side_effect = [Mock()]
+        session_cls_mock.side_effect = [session_mock]
+        Route53Provider(id='test', profile="test-profile")
+        session_cls_mock.assert_called_once_with(profile_name="test-profile")
+        session_mock.client.assert_called_once_with(
+            service_name='route53', config=None
+        )
+
+    @patch('octodns_route53.auth.Session')
+    def test_populate_with_role_acquisition(self, session_cls_mock):
         # a mock so that when `assume_role` is called on it we get back new
         # assumed credentials
         assume_role_mock = Mock()
@@ -931,7 +942,11 @@ class TestRoute53Provider(TestCase):
         ]
         # first call will be for the STS client which needs to assume role,
         # the second call will be for the route53 client, it won't be used
-        client_mock.side_effect = [assume_role_mock, False]
+        session_mock1 = Mock()
+        session_mock1.client.side_effect = [assume_role_mock]
+        session_mock2 = Mock()
+        session_mock2.client.side_effect = [Mock()]
+        session_cls_mock.side_effect = [session_mock1, session_mock2]
         # now create our provider
         role_arn = 'arn:aws:iam:12345:role/foo'
         Route53Provider(
@@ -941,30 +956,28 @@ class TestRoute53Provider(TestCase):
             role_arn=role_arn,
         )
         # make sure assume role was called with the exepected role_arn
-        assume_role_mock.assume_role.assert_called_once_with(
-            RoleArn=role_arn, RoleSessionName='octodns-route53-test'
-        )
-        # make sure we had 2 calls to get clients
-        client_mock.assert_has_calls(
+        session_cls_mock.assert_has_calls(
             [
-                # the first time with the base params to get a STS client
                 call(
-                    service_name='sts',
                     aws_access_key_id='abc',
                     aws_secret_access_key='123',
                     aws_session_token=None,
-                    config=None,
                 ),
-                # the second time, with the assumed role's key, secret,
-                # and session, this time to gets the actual route53 client
                 call(
-                    service_name='route53',
                     aws_access_key_id=42,
                     aws_secret_access_key=43,
                     aws_session_token=45,
-                    config=None,
                 ),
             ]
+        )
+        assume_role_mock.assume_role.assert_called_once_with(
+            RoleArn=role_arn, RoleSessionName='octodns-route53-test'
+        )
+        session_mock1.client.assert_called_once_with(
+            service_name='sts', config=None
+        )
+        session_mock2.client.assert_called_once_with(
+            service_name='route53', config=None
         )
 
     def test_list_zones(self):

@@ -45,6 +45,8 @@ providers:
     # The AWS session token (optional)
     # Only needed if using temporary security credentials
     #session_token: env/AWS_SESSION_TOKEN
+    # The AWS profile name (optional)
+    #profile:
 ```
 
 Alternatively, you may leave out access_key_id, secret_access_key and session_token.  This will result in boto3 deciding authentication dynamically.

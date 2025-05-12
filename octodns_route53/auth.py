@@ -4,7 +4,7 @@
 
 import re
 
-from boto3 import client
+from boto3 import Session
 from botocore.config import Config
 
 
@@ -16,17 +16,19 @@ class _AuthMixin:
         secret_access_key,
         session_token,
         role_arn,
+        profile,
         client_max_attempts,
         *args,
         **kwargs,
     ):
         self.log.debug(
-            'client: service_name=%s, access_key_id=%s, secret_access_key=%s, session_token=%s, client_max_attempts=%s',
+            'client: service_name=%s, access_key_id=%s, secret_access_key=%s, session_token=%s, client_max_attempts=%s, profile=%s',
             service_name,
             access_key_id,
             secret_access_key is not None,
             session_token is not None,
             client_max_attempts,
+            profile,
         )
 
         if role_arn:
@@ -39,6 +41,7 @@ class _AuthMixin:
                 secret_access_key,
                 session_token,
                 None,
+                profile,
                 client_max_attempts,
                 *args,
                 **kwargs,
@@ -75,15 +78,17 @@ class _AuthMixin:
             )
             config = Config(retries={'max_attempts': client_max_attempts})
 
-        if use_fallback_auth:
-            return client(service_name, *args, config=config, **kwargs)
+        session_kwargs = {}
+        if profile is not None:
+            session_kwargs['profile_name'] = profile
 
-        return client(
-            *args,
-            service_name=service_name,
-            aws_access_key_id=access_key_id,
-            aws_secret_access_key=secret_access_key,
-            aws_session_token=session_token,
-            config=config,
-            **kwargs,
+        if not use_fallback_auth:
+            session_kwargs['aws_access_key_id'] = access_key_id
+            session_kwargs['aws_secret_access_key'] = secret_access_key
+            session_kwargs['aws_session_token'] = session_token
+
+        session = Session(**session_kwargs)
+
+        return session.client(
+            *args, service_name=service_name, config=config, **kwargs
         )
