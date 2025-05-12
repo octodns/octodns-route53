@@ -629,6 +629,8 @@ class Route53Provider(_AuthMixin, BaseProvider):
         # The AWS session token (optional)
         # Only needed if using temporary security credentials
         session_token:
+        # The AWS profile name (optional)
+        profile:
 
     Alternatively, you may leave out access_key_id, secret_access_key
     and session_token.
@@ -672,6 +674,7 @@ class Route53Provider(_AuthMixin, BaseProvider):
         client_max_attempts=None,
         session_token=None,
         role_arn=None,
+        profile=None,
         delegation_set_id=None,
         get_zones_by_name=False,
         *args,
@@ -698,6 +701,7 @@ class Route53Provider(_AuthMixin, BaseProvider):
             secret_access_key=secret_access_key,
             session_token=session_token,
             role_arn=role_arn,
+            profile=profile,
             client_max_attempts=client_max_attempts,
         )
 
