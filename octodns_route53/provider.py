@@ -677,12 +677,14 @@ class Route53Provider(_AuthMixin, BaseProvider):
         profile=None,
         delegation_set_id=None,
         get_zones_by_name=False,
+        private=None,
         *args,
         **kwargs,
     ):
         self.max_changes = max_changes
         self.delegation_set_id = delegation_set_id
         self.get_zones_by_name = get_zones_by_name
+        self.private = private
 
         self.log = logging.getLogger(f'Route53Provider[{id}]')
         self.log.info(
@@ -736,6 +738,14 @@ class Route53Provider(_AuthMixin, BaseProvider):
                 while more:
                     resp = self._conn.list_hosted_zones(**start)
                     for z in resp['HostedZones']:
+                        private_zone = z.get('Config', {}).get(
+                            'PrivateZone', False
+                        )
+                        if (
+                            self.private is not None
+                            and self.private != private_zone
+                        ):
+                            continue
                         zones[_octal_replace(z['Name'])] = z['Id']
                     more = resp['IsTruncated']
                     start['Marker'] = resp.get('NextMarker', None)
@@ -758,14 +768,12 @@ class Route53Provider(_AuthMixin, BaseProvider):
             self.log.debug(
                 '_get_zone_id:   no matching zone, creating, ref=%s', ref
             )
+            params = {"Name": name, "CallerReference": ref}
             if del_set:
-                resp = self._conn.create_hosted_zone(
-                    Name=name, CallerReference=ref, DelegationSetId=del_set
-                )
-            else:
-                resp = self._conn.create_hosted_zone(
-                    Name=name, CallerReference=ref
-                )
+                params["DelegationSetId"] = del_set
+            if self.private is not None:
+                params["HostedZoneConfig"] = {"PrivateZone": self.private}
+            resp = self._conn.create_hosted_zone(**params)
             self._r53_zones[name] = id = resp['HostedZone']['Id']
         return id
 
@@ -1105,7 +1113,11 @@ class Route53Provider(_AuthMixin, BaseProvider):
         more = True
         while more:
             resp = self._conn.list_hosted_zones(**params)
-            hosted_zones.extend([h['Name'] for h in resp['HostedZones']])
+            for h in resp['HostedZones']:
+                private_zone = h.get('Config', {}).get('PrivateZone', False)
+                if self.private is not None and self.private != private_zone:
+                    continue
+                hosted_zones.append(h['Name'])
             params['Marker'] = resp.get('NextMarker', None)
             more = resp['IsTruncated']
 
