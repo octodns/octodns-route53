@@ -713,15 +713,22 @@ class Route53Provider(_AuthMixin, BaseProvider):
 
     def _get_zone_id_by_name(self, name):
         # attempt to get zone by name
-        # limited to one as this should be unique
-        id = None
-        resp = self._conn.list_hosted_zones_by_name(DNSName=name, MaxItems="1")
+        resp = self._conn.list_hosted_zones_by_name(
+            DNSName=name, MaxItems="100"
+        )
         if len(resp['HostedZones']) != 0:
-            # if there is a response that starts with the name
-            if _octal_replace(resp['HostedZones'][0]['Name']).startswith(name):
-                id = resp['HostedZones'][0]['Id']
-                self.log.debug('get_zones_by_name:   id=%s', id)
-        return id
+            for z in resp['HostedZones']:
+                private_zone = z.get('Config', {}).get('PrivateZone', False)
+                if self.private is not None and self.private != private_zone:
+                    continue
+
+                # if there is a response that starts with the name
+                if _octal_replace(z['Name']).startswith(name):
+                    id = z['Id']
+                    self.log.debug('get_zones_by_name:   id=%s', id)
+                    return id
+
+        return None
 
     def update_r53_zones(self, name):
         if self._r53_zones is None:
