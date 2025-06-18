@@ -692,7 +692,7 @@ class TestRoute53Provider(TestCase):
                 },
                 {
                     'Id': 'z41',
-                    'Name': 'private.unit.tests.',
+                    'Name': 'unit.tests.',
                     'CallerReference': 'abc',
                     'Config': {'Comment': 'string', 'PrivateZone': True},
                     'ResourceRecordSetCount': 123,
@@ -706,7 +706,37 @@ class TestRoute53Provider(TestCase):
         stubber.add_response('list_hosted_zones', list_hosted_zones)
 
         provider.update_r53_zones("unit.tests.")
-        self.assertEqual(provider._r53_zones, {'private.unit.tests.': 'z41'})
+        self.assertEqual(provider._r53_zones, {'unit.tests.': 'z41'})
+
+    def test_update_r53_zones_multiple(self):
+        provider, stubber = self._get_stubbed_provider()
+
+        list_hosted_zones = {
+            'HostedZones': [
+                {
+                    'Id': 'z40',
+                    'Name': 'unit.tests.',
+                    'CallerReference': 'abc',
+                    'Config': {'Comment': 'string', 'PrivateZone': False},
+                    'ResourceRecordSetCount': 123,
+                },
+                {
+                    'Id': 'z41',
+                    'Name': 'unit.tests.',
+                    'CallerReference': 'abc',
+                    'Config': {'Comment': 'string', 'PrivateZone': True},
+                    'ResourceRecordSetCount': 123,
+                },
+            ],
+            'Marker': 'm',
+            'IsTruncated': False,
+            'MaxItems': '100',
+        }
+
+        stubber.add_response('list_hosted_zones', list_hosted_zones)
+
+        with self.assertRaises(Route53ProviderException):
+            provider.update_r53_zones("unit.tests.")
 
     def test_get_r53_private_zones_with_get_zones_by_name(self):
         (provider, stubber) = (
@@ -1087,6 +1117,24 @@ class TestRoute53Provider(TestCase):
         }
         stubber.add_response('list_hosted_zones', list_hosted_zones_resp, {})
         self.assertEqual(['alpha.com.', 'unit.tests.'], provider.list_zones())
+
+    def test_list_zones_multiple(self):
+        provider, stubber = self._get_stubbed_provider()
+
+        list_hosted_zones_mutliple_resp = {
+            'HostedZones': [
+                {'Name': 'unit.tests.', 'Id': 'z42', 'CallerReference': 'abc'},
+                {'Name': 'unit.tests.', 'Id': 'z43', 'CallerReference': 'abd'},
+            ],
+            'Marker': '',
+            'IsTruncated': False,
+            'MaxItems': '100',
+        }
+        stubber.add_response(
+            'list_hosted_zones', list_hosted_zones_mutliple_resp, {}
+        )
+        with self.assertRaises(Route53ProviderException):
+            provider.list_zones()
 
     def test_list_private_zones(self):
         provider, stubber = self._get_stubbed_private_provider()
@@ -2673,6 +2721,62 @@ class TestRoute53Provider(TestCase):
         extra = provider._extra_changes(desired=desired, changes=[])
         self.assertEqual([], extra)
         stubber.assert_no_pending_responses()
+
+    def test_get_zones_by_name_mutiple_zone_exists(self):
+        (provider, stubber) = (
+            self._get_stubbed_get_zones_by_name_enabled_provider()
+        )
+
+        list_hosted_zones_by_name_resp = {
+            'HostedZones': [
+                {
+                    'Id': 'z42',
+                    'Name': 'unit.tests.',
+                    'CallerReference': 'abc',
+                    'Config': {'Comment': 'string', 'PrivateZone': False},
+                    'ResourceRecordSetCount': 123,
+                },
+                {
+                    'Id': 'z43',
+                    'Name': 'unit.tests.',
+                    'CallerReference': 'abc',
+                    'Config': {'Comment': 'string', 'PrivateZone': True},
+                    'ResourceRecordSetCount': 123,
+                },
+            ],
+            'DNSName': 'unit.tests.',
+            'HostedZoneId': 'z42',
+            'IsTruncated': False,
+            'MaxItems': 'string',
+        }
+
+        list_resource_record_sets_resp = {
+            'ResourceRecordSets': [
+                {
+                    'Name': 'a.unit.tests.',
+                    'Type': 'A',
+                    'ResourceRecords': [{'Value': '2.2.3.4'}],
+                    'TTL': 61,
+                }
+            ],
+            'IsTruncated': False,
+            'MaxItems': '100',
+        }
+
+        stubber.add_response(
+            'list_hosted_zones_by_name',
+            list_hosted_zones_by_name_resp,
+            {'DNSName': 'unit.tests.', 'MaxItems': '100'},
+        )
+
+        stubber.add_response(
+            'list_resource_record_sets',
+            list_resource_record_sets_resp,
+            {'HostedZoneId': 'z42'},
+        )
+
+        with self.assertRaises(Route53ProviderException):
+            provider.plan(self.expected)
 
     def test_plan_apply_with_get_zones_by_name_zone_not_exists(self):
         (provider, stubber) = (

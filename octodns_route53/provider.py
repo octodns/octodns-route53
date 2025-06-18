@@ -716,6 +716,7 @@ class Route53Provider(_AuthMixin, BaseProvider):
         resp = self._conn.list_hosted_zones_by_name(
             DNSName=name, MaxItems="100"
         )
+        id = None
         if len(resp['HostedZones']) != 0:
             for z in resp['HostedZones']:
                 private_zone = z.get('Config', {}).get('PrivateZone', False)
@@ -724,11 +725,13 @@ class Route53Provider(_AuthMixin, BaseProvider):
 
                 # if there is a response that starts with the name
                 if _octal_replace(z['Name']).startswith(name):
+                    if id is not None:
+                        raise Route53ProviderException(
+                            f'Multiple zones named "{z["Name"]}" were found.'
+                        )
                     id = z['Id']
                     self.log.debug('get_zones_by_name:   id=%s', id)
-                    return id
-
-        return None
+        return id
 
     def update_r53_zones(self, name):
         if self._r53_zones is None:
@@ -753,7 +756,12 @@ class Route53Provider(_AuthMixin, BaseProvider):
                             and self.private != private_zone
                         ):
                             continue
-                        zones[_octal_replace(z['Name'])] = z['Id']
+                        zname = _octal_replace(z['Name'])
+                        if zname in zones:
+                            raise Route53ProviderException(
+                                f'Multiple zones named "{zname}" were found.'
+                            )
+                        zones[zname] = z['Id']
                     more = resp['IsTruncated']
                     start['Marker'] = resp.get('NextMarker', None)
                 self._r53_zones = zones
@@ -1124,6 +1132,10 @@ class Route53Provider(_AuthMixin, BaseProvider):
                 private_zone = h.get('Config', {}).get('PrivateZone', False)
                 if self.private is not None and self.private != private_zone:
                     continue
+                if h['Name'] in hosted_zones:
+                    raise Route53ProviderException(
+                        f'Multiple zones named "{h["Name"]}" were found.'
+                    )
                 hosted_zones.append(h['Name'])
             params['Marker'] = resp.get('NextMarker', None)
             more = resp['IsTruncated']
