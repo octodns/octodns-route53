@@ -52,6 +52,16 @@ dev_frozen = (
     ]
     + dev_frozen[i + 1 :]
 )
+# same for urllib3 as boto has an old version pinned on 3.9
+i = [i for i, r in enumerate(frozen) if r.startswith('urllib3==')][0]
+frozen = (
+    frozen[:i]
+    + [
+        "urllib3==1.26.20; python_version<'3.10'",
+        f"{frozen[i]}; python_version>='3.10'",
+    ]
+    + frozen[i + 1 :]
+)
 
 print_packages(frozen, 'frozen')
 print_packages(dev_frozen, 'dev_frozen')
