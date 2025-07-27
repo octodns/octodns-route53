@@ -1,10 +1,3 @@
-## v1.?.? - 2025-??-?? - ???
-
-* Multiple zones with the same name will now throw an error message, behavior
-  previously would not have been deterministic.
-* New provider paramater, private, added to enable specifying zone type. Note
-  that VPC associations are managed.
-
 ## v1.0.1 - 2025-05-05 - Only clamp when forced
 
 * Don't clamp urllib3 unless we're on 3.8 or 3.9 where it's actually needed
