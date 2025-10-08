@@ -135,10 +135,12 @@ octodns-2: bar.other.com.
 
 #### Processors
 
+Ignores AWS ACM validation CNAME records.
+
 ```yaml
 processors:
     awsacm:
-    class: octodns.processor.acme.AwsAcmMangingProcessor
+    class: octodns_route53.processor.AwsAcmMangingProcessor
 
 ...
 
