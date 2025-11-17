@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # Get current script path
-SCRIPT_PATH="$( dirname -- "$( readlink -f -- "${0}"; )"; )"
+SCRIPT_PATH="$(dirname -- "$(readlink -f -- "${0}")")"
 # Activate OctoDNS Python venv
 source "${SCRIPT_PATH}/common.sh"
 
-SOURCES="$(find *.py octodns_route53 tests -name "*.py") $(grep --files-with-matches '^#!.*python' script/*)"
+SOURCES="$(find *.py octodns_route53 tests -name "*.py") $(grep --files-with-matches '^#!.*python' script/* || true)"
 
 pyflakes $SOURCES
