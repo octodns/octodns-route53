@@ -9,86 +9,6 @@ Octodns-route53 requires permissions for three AWS services:
 - **EC2**: for instance discovery (optional, if you use Ec2Source)
 - **ELBv2**: for load balancer discovery (optional, if you use ElbSource)
 
-## Route53 Permissions (required)
-
-These permissions are required for the main Route53 provider.
-
-### 1. Hosted Zone Management
-
-#### `route53:ListHostedZones`
-- **File**: [octodns_route53/provider.py](octodns_route53/provider.py#L749)
-- **Usage**: Lists all hosted zones in your AWS account
-- **Context**: Loads and caches all available zones
-
-#### `route53:ListHostedZonesByName`
-- **File**: [octodns_route53/provider.py](octodns_route53/provider.py#L716)
-- **Usage**: Retrieves hosted zones by DNS name
-- **Context**: Used to find a specific zone by its name
-
-#### `route53:CreateHostedZone`
-- **File**: [octodns_route53/provider.py](octodns_route53/provider.py#L791)
-- **Usage**: Creates a new hosted zone if it doesn't exist
-- **Context**: Only required if you want to automatically create new zones
-
-### 2. DNS Record Management
-
-#### `route53:ListResourceRecordSets`
-- **File**: [octodns_route53/provider.py](octodns_route53/provider.py#L945)
-- **Usage**: Lists all DNS records in a hosted zone
-- **Context**: Loads the current state of DNS records for comparison and synchronization
-
-#### `route53:ChangeResourceRecordSets`
-- **File**: [octodns_route53/provider.py](octodns_route53/provider.py#L1785)
-- **Usage**: Creates, modifies, or deletes DNS records
-- **Context**: Applies DNS changes (creates, updates, deletes)
-
-### 3. Health Check Management
-
-#### `route53:ListHealthChecks`
-- **File**: [octodns_route53/provider.py](octodns_route53/provider.py#L1251)
-- **Usage**: Lists all Route53 health checks
-- **Context**: Loads existing health checks for records with monitoring
-
-#### `route53:CreateHealthCheck`
-- **File**: [octodns_route53/provider.py](octodns_route53/provider.py#L1446)
-- **Usage**: Creates new health checks to monitor DNS records
-- **Context**: Required for dynamic records with health checking
-
-#### `route53:DeleteHealthCheck`
-- **Files**: 
-  - [octodns_route53/provider.py](octodns_route53/provider.py#L1506)
-  - [octodns_route53/provider.py](octodns_route53/provider.py#L1513)
-- **Usage**: Deletes obsolete health checks
-- **Context**: Cleanup of health checks that are no longer in use
-
-#### `route53:ChangeTagsForResource`
-- **File**: [octodns_route53/provider.py](octodns_route53/provider.py#L1455)
-- **Usage**: Adds tags to health checks
-- **Context**: Tags health checks with a name for easier identification in the AWS console
-
-## EC2 Permissions (optional)
-
-Ces permissions sont nécessaires uniquement si vous utilisez `Ec2Source` pour découvrir automatiquement les instances EC2.
-
-#### `ec2:DescribeInstances`
-- **File**: [octodns_route53/source.py](octodns_route53/source.py#L67)
-- **Usage**: Lists and retrieves EC2 instance information
-- **Context**: Enables automatic creation of DNS records based on EC2 instances and their tags
-
-## ELBv2 Permissions (optional)
-
-These permissions are only required if you use `ElbSource` to automatically discover load balancers.
-
-#### `elasticloadbalancing:DescribeLoadBalancers`
-- **File**: [octodns_route53/source.py](octodns_route53/source.py#L248)
-- **Usage**: Lists all Application/Network Load Balancers
-- **Context**: Enables retrieval of load balancer information to create DNS records
-
-#### `elasticloadbalancing:DescribeTags`
-- **File**: [octodns_route53/source.py](octodns_route53/source.py#L260)
-- **Usage**: Retrieves tags associated with load balancers
-- **Context**: Enables identification of FQDNs from load balancer tags
-
 ## IAM Policy Examples
 
 ### Minimal Configuration (read-only)
@@ -186,24 +106,98 @@ These permissions are only required if you use `ElbSource` to automatically disc
 | **With EC2 discovery** | Route53 permissions + `ec2:DescribeInstances` |
 | **With ELB discovery** | Route53 permissions + `elasticloadbalancing:DescribeLoadBalancers`, `elasticloadbalancing:DescribeTags` |
 
+## Route53 Permissions (required)
+
+These permissions are required for the main Route53 provider.
+
+### 1. Hosted Zone Management
+
+#### `route53:ListHostedZones`
+- **Method**: `Route53Provider.update_r53_zones()`
+- **Usage**: Lists all hosted zones in your AWS account
+- **Context**: Loads and caches all available zones
+
+#### `route53:ListHostedZonesByName`
+- **Method**: `Route53Provider._get_zone_id_by_name()`
+- **Usage**: Retrieves hosted zones by DNS name
+- **Context**: Used to find a specific zone by its name
+
+#### `route53:CreateHostedZone`
+- **Method**: `Route53Provider.update_r53_zones()`
+- **Usage**: Creates a new hosted zone if it doesn't exist
+- **Context**: Only required if you want to automatically create new zones
+
+### 2. DNS Record Management
+
+#### `route53:ListResourceRecordSets`
+- **Method**: `Route53Provider._load_records()`
+- **Usage**: Lists all DNS records in a hosted zone
+- **Context**: Loads the current state of DNS records for comparison and synchronization
+
+#### `route53:ChangeResourceRecordSets`
+- **Method**: `Route53Provider._really_apply()`
+- **Usage**: Creates, modifies, or deletes DNS records
+- **Context**: Applies DNS changes (creates, updates, deletes)
+
+### 3. Health Check Management
+
+#### `route53:ListHealthChecks`
+- **Method**: `Route53Provider.health_checks`
+- **Usage**: Lists all Route53 health checks
+- **Context**: Loads existing health checks for records with monitoring
+
+#### `route53:CreateHealthCheck`
+- **Method**: `Route53Provider._create_health_check()`
+- **Usage**: Creates new health checks to monitor DNS records
+- **Context**: Required for dynamic records with health checking
+
+#### `route53:DeleteHealthCheck`
+- **Method**: `Route53Provider._gc_health_checks()`
+- **Usage**: Deletes obsolete health checks
+- **Context**: Cleanup of health checks that are no longer in use
+
+#### `route53:ChangeTagsForResource`
+- **Method**: `Route53Provider._create_health_check()`
+- **Usage**: Adds tags to health checks
+- **Context**: Tags health checks with a name for easier identification in the AWS console
+
+## EC2 Permissions (optional)
+
+These permissions are only required if you use `Ec2Source` to automatically discover EC2 instances.
+
+#### `ec2:DescribeInstances`
+- **Method**: `Ec2Source.instances`
+- **Usage**: Lists and retrieves EC2 instance information
+- **Context**: Enables automatic creation of DNS records based on EC2 instances and their tags
+
+## ELBv2 Permissions (optional)
+
+These permissions are only required if you use `ElbSource` to automatically discover load balancers.
+
+#### `elasticloadbalancing:DescribeLoadBalancers`
+- **Method**: `ElbSource.lbs`
+- **Usage**: Lists all Application/Network Load Balancers
+- **Context**: Enables retrieval of load balancer information to create DNS records
+
+#### `elasticloadbalancing:DescribeTags`
+- **Method**: `ElbSource.lbs`
+- **Usage**: Retrieves tags associated with load balancers
+- **Context**: Enables identification of FQDNs from load balancer tags
+
 ## Important Notes
 
-1. **Ressources globales** : La plupart des actions Route53 nécessitent `"Resource": "*"` car Route53 est un service global.
+1. **Global resources**: Most Route53 actions require `"Resource": "*"` because Route53 is a global service.
 
-2. **Health checks** : Si vous n'utilisez pas de health checks (pas d'enregistrements dynamiques), vous pouvez omettre :
+2. **Health checks**: If you don't use health checks (no dynamic records), you can omit:
    - `route53:ListHealthChecks`
    - `route53:CreateHealthCheck`
    - `route53:DeleteHealthCheck`
    - `route53:ChangeTagsForResource`
 
-3. **Création de zones** : Si vous gérez vos zones manuellement via la console AWS, vous pouvez omettre `route53:CreateHostedZone`.
+3. **Zone creation**: If you manage your zones manually via the AWS console, you can omit `route53:CreateHostedZone`.
 
-4. **Suppression de zones** : octodns-route53 ne supprime **jamais** de zones hébergées. La permission `route53:DeleteHostedZone` n'est donc pas nécessaire. La suppression de zones doit être effectuée manuellement via la console AWS ou AWS CLI.
+4. **Zone deletion**: octodns-route53 **never** deletes hosted zones. The `route53:DeleteHostedZone` permission is therefore not required. Zone deletion must be performed manually via the AWS console or AWS CLI.
 
-5. **Mode dry-run** : Même en mode `--dryrun`, les permissions de lecture sont nécessaires pour charger l'état actuel.
+5. **Dry-run mode**: Even when `octodns-sync`, read permissions are required to load the current state.
 
-6. **Sources optionnelles** : Les permissions EC2 et ELBv2 ne sont nécessaires que si vous configurez explicitement `Ec2Source` ou `ElbSource` dans votre configuration octoDNS.
-
-## Références de code
-
-Toutes les références aux lignes de code pointent vers la branche `main` du repository. Les numéros de ligne peuvent changer avec les mises à jour du code.
+6. **Optional sources**: EC2 and ELBv2 permissions are only required if you explicitly configure `Ec2Source` or `ElbSource` in your octoDNS configuration.
