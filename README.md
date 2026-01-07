@@ -51,6 +51,15 @@ providers:
     # If zone creation is required and this option is set, zones will be created as private.
     # Set to true to only use private zones, false for public zones, or omit for no restriction.
     #private: False
+    # Optionally restrict hosted zone lookup to zones associated with a specific VPC.
+    # When specified, only zones associated with this VPC will be managed.
+    # Zone creation will automatically create private zones with this VPC association.
+    # Implies private=true (VPC-associated zones are always private).
+    # Cannot be used with private=false.
+    #vpc_id: vpc-12345678
+    # Optionally specify the VPC region explicitly.
+    # If not provided, falls back to AWS SDK defaults.
+    #vpc_region: us-east-1
 ```
 
 Alternatively, you may leave out access_key_id, secret_access_key and session_token.  This will result in boto3 deciding authentication dynamically.
