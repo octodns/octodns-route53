@@ -683,16 +683,20 @@ class Route53Provider(_AuthMixin, BaseProvider):
         *args,
         **kwargs,
     ):
-        # Validate vpc_id and private compatibility
-        if vpc_id is not None and private is False:
-            raise Route53ProviderException(
-                'vpc_id cannot be used with private=False '
-                '(VPC-associated zones are always private)'
-            )
-
-        # VPC zones are always private - imply private=True when vpc_id is set
-        if vpc_id is not None and private is None:
-            private = True
+        # Validate vpc_id configuration
+        if vpc_id is not None:
+            if vpc_region is None:
+                raise Route53ProviderException(
+                    'vpc_region is required when vpc_id is specified'
+                )
+            if private is False:
+                raise Route53ProviderException(
+                    'vpc_id cannot be used with private=False '
+                    '(VPC-associated zones are always private)'
+                )
+            # VPC zones are always private
+            if private is None:
+                private = True
 
         # Validate delegation_set_id and private compatibility
         if delegation_set_id is not None and private is True:
@@ -706,6 +710,7 @@ class Route53Provider(_AuthMixin, BaseProvider):
         self.get_zones_by_name = get_zones_by_name
         self.private = private
         self.vpc_id = vpc_id
+        self.vpc_region = vpc_region
 
         self.log = logging.getLogger(f'Route53Provider[{id}]')
         self.log.info(
@@ -736,16 +741,6 @@ class Route53Provider(_AuthMixin, BaseProvider):
         self._r53_rrsets = {}
         self._health_checks = None
         self._vpc_zone_ids = None  # Cache of zone IDs associated with vpc_id
-
-        # Validate VPC configuration - vpc_region is required when vpc_id is set
-        if self.vpc_id is not None:
-            if vpc_region is None:
-                raise Route53ProviderException(
-                    'vpc_region is required when vpc_id is specified'
-                )
-            self.vpc_region = vpc_region
-        else:
-            self.vpc_region = None
 
     def _get_zone_id_by_name(self, name):
         # attempt to get zone by name

@@ -752,6 +752,7 @@ class TestRoute53Provider(TestCase):
                 strict_supports=False,
                 private=False,
                 vpc_id='vpc-12345678',
+                vpc_region='us-east-1',
             )
         self.assertIn(
             'vpc_id cannot be used with private=False', str(ctx.exception)
