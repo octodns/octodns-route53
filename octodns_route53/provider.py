@@ -735,6 +735,7 @@ class Route53Provider(_AuthMixin, BaseProvider):
         self._r53_zones = None
         self._r53_rrsets = {}
         self._health_checks = None
+        self._vpc_zone_ids = None  # Cache of zone IDs associated with vpc_id
 
         # Validate and store VPC region if vpc_id is specified
         if self.vpc_id is not None:
@@ -759,8 +760,7 @@ class Route53Provider(_AuthMixin, BaseProvider):
                     continue
 
                 # Filter by VPC if vpc_id is specified.
-                # Note: This makes a get_hosted_zone API call per candidate
-                # zone to check VPC association.
+                # Uses cached vpc_zone_ids for O(1) lookup.
                 if self.vpc_id is not None:
                     if not self._zone_has_vpc(z['Id']):
                         continue
@@ -815,11 +815,25 @@ class Route53Provider(_AuthMixin, BaseProvider):
 
         return zones
 
+    @property
+    def vpc_zone_ids(self):
+        '''
+        Returns a set of zone IDs associated with self.vpc_id.
+        Lazy-loaded on first access via list_hosted_zones_by_vpc().
+        '''
+        if self._vpc_zone_ids is None and self.vpc_id is not None:
+            self.log.debug('vpc_zone_ids: loading for vpc_id=%s', self.vpc_id)
+            zones = self._get_zones_by_vpc()
+            self._vpc_zone_ids = set(zones.values())
+        return self._vpc_zone_ids
+
     def _zone_has_vpc(self, zone_id):
-        '''Check if a zone is associated with self.vpc_id'''
-        resp = self._conn.get_hosted_zone(Id=zone_id)
-        vpcs = resp.get('VPCs', [])
-        return any(vpc.get('VPCId') == self.vpc_id for vpc in vpcs)
+        '''Check if a zone is associated with self.vpc_id using cached data'''
+        # Normalize zone_id format for comparison
+        # _get_zones_by_vpc() returns IDs with /hostedzone/ prefix
+        if not zone_id.startswith('/hostedzone/'):
+            zone_id = f'/hostedzone/{zone_id}'
+        return zone_id in self.vpc_zone_ids
 
     def update_r53_zones(self, name):
         if self._r53_zones is None:

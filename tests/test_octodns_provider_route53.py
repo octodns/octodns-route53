@@ -986,10 +986,12 @@ class TestRoute53Provider(TestCase):
         )
 
         # list_hosted_zones_by_name returns multiple zones
+        # z40 has /hostedzone/ prefix (tests branch where normalization is skipped)
+        # z41 has no prefix (tests branch where normalization is applied)
         list_hosted_zones_by_name_resp = {
             'HostedZones': [
                 {
-                    'Id': 'z40',
+                    'Id': '/hostedzone/z40',
                     'Name': 'unit.tests.',
                     'CallerReference': 'abc',
                     'Config': {'Comment': 'string', 'PrivateZone': True},
@@ -1014,35 +1016,26 @@ class TestRoute53Provider(TestCase):
             {'DNSName': 'unit.tests.', 'MaxItems': '100'},
         )
 
-        # z40 is NOT associated with our VPC
-        get_hosted_zone_z40_resp = {
-            'HostedZone': {
-                'Id': 'z40',
-                'Name': 'unit.tests.',
-                'CallerReference': 'abc',
-                'Config': {'PrivateZone': True},
-            },
-            'VPCs': [{'VPCId': 'vpc-other', 'VPCRegion': 'us-east-1'}],
+        # Single list_hosted_zones_by_vpc call returns only z41 (in our VPC)
+        # This replaces the previous two get_hosted_zone calls
+        list_hosted_zones_by_vpc_resp = {
+            'HostedZoneSummaries': [
+                {
+                    'HostedZoneId': 'z41',
+                    'Name': 'unit.tests.',
+                    'Owner': {'OwningAccount': '123456789012'},
+                }
+            ],
+            'MaxItems': '100',
         }
         stubber.add_response(
-            'get_hosted_zone', get_hosted_zone_z40_resp, {'Id': 'z40'}
-        )
-
-        # z41 IS associated with our VPC
-        get_hosted_zone_z41_resp = {
-            'HostedZone': {
-                'Id': 'z41',
-                'Name': 'unit.tests.',
-                'CallerReference': 'abc',
-                'Config': {'PrivateZone': True},
-            },
-            'VPCs': [{'VPCId': 'vpc-12345678', 'VPCRegion': 'us-east-1'}],
-        }
-        stubber.add_response(
-            'get_hosted_zone', get_hosted_zone_z41_resp, {'Id': 'z41'}
+            'list_hosted_zones_by_vpc',
+            list_hosted_zones_by_vpc_resp,
+            {'VPCId': 'vpc-12345678', 'VPCRegion': 'us-east-1'},
         )
 
         provider.update_r53_zones("unit.tests.")
+        # Zone ID comes from list_hosted_zones_by_name (without /hostedzone/ prefix)
         self.assertEqual(provider._r53_zones, {'unit.tests.': 'z41'})
 
     def test_update_r53_zones_with_get_zones_by_name(self):
