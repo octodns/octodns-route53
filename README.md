@@ -56,9 +56,10 @@ providers:
     # Zone creation will automatically create private zones with this VPC association.
     # Implies private=true (VPC-associated zones are always private).
     # Cannot be used with private=false.
+    # Requires vpc_region to be specified.
     #vpc_id: vpc-12345678
-    # Optionally specify the VPC region explicitly.
-    # If not provided, falls back to AWS SDK defaults.
+    # The region of the VPC specified in vpc_id.
+    # Required when vpc_id is specified.
     #vpc_region: us-east-1
 ```
 

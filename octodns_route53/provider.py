@@ -737,13 +737,13 @@ class Route53Provider(_AuthMixin, BaseProvider):
         self._health_checks = None
         self._vpc_zone_ids = None  # Cache of zone IDs associated with vpc_id
 
-        # Validate and store VPC region if vpc_id is specified
+        # Validate VPC configuration - vpc_region is required when vpc_id is set
         if self.vpc_id is not None:
-            self.vpc_region = vpc_region or self._conn.meta.region_name
-            if not self.vpc_region:
+            if vpc_region is None:
                 raise Route53ProviderException(
-                    'vpc_id requires vpc_region to be configured'
+                    'vpc_region is required when vpc_id is specified'
                 )
+            self.vpc_region = vpc_region
         else:
             self.vpc_region = None
 

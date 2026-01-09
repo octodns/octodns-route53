@@ -2,7 +2,7 @@
 #
 #
 from unittest import TestCase
-from unittest.mock import Mock, PropertyMock, call, patch
+from unittest.mock import Mock, call, patch
 
 from botocore.exceptions import ClientError
 from botocore.stub import ANY, Stubber
@@ -656,17 +656,13 @@ class TestRoute53Provider(TestCase):
         return (provider, stubber)
 
     def _get_stubbed_vpc_provider(self, vpc_id='vpc-12345678'):
-        # Patch region_name before creating provider since vpc_region is set at init
-        patcher = patch(
-            'botocore.client.ClientMeta.region_name',
-            new_callable=PropertyMock,
-            return_value='us-east-1',
-        )
-        patcher.start()
-        self.addCleanup(patcher.stop)
-
         provider = Route53Provider(
-            'test', 'abc', '123', strict_supports=False, vpc_id=vpc_id
+            'test',
+            'abc',
+            '123',
+            strict_supports=False,
+            vpc_id=vpc_id,
+            vpc_region='us-east-1',
         )
 
         # Use the stubber
@@ -678,15 +674,6 @@ class TestRoute53Provider(TestCase):
     def _get_stubbed_get_zones_by_name_enabled_vpc_provider(
         self, vpc_id='vpc-12345678'
     ):
-        # Patch region_name before creating provider since vpc_region is set at init
-        patcher = patch(
-            'botocore.client.ClientMeta.region_name',
-            new_callable=PropertyMock,
-            return_value='us-east-1',
-        )
-        patcher.start()
-        self.addCleanup(patcher.stop)
-
         provider = Route53Provider(
             'test',
             'abc',
@@ -694,6 +681,7 @@ class TestRoute53Provider(TestCase):
             get_zones_by_name=True,
             strict_supports=False,
             vpc_id=vpc_id,
+            vpc_region='us-east-1',
         )
 
         # Use the stubber
@@ -897,22 +885,16 @@ class TestRoute53Provider(TestCase):
             provider.update_r53_zones("unit.tests.")
 
     def test_vpc_id_missing_region_raises(self):
-        # Mock region_name as None before provider creation
-        # The error should be raised during __init__
-        with patch(
-            'botocore.client.ClientMeta.region_name',
-            new_callable=PropertyMock,
-            return_value=None,
-        ):
-            with self.assertRaises(Route53ProviderException) as ctx:
-                Route53Provider(
-                    'test',
-                    'abc',
-                    '123',
-                    strict_supports=False,
-                    vpc_id='vpc-12345678',
-                )
-            self.assertIn('vpc_id requires vpc_region', str(ctx.exception))
+        # vpc_region is required when vpc_id is specified
+        with self.assertRaises(Route53ProviderException) as ctx:
+            Route53Provider(
+                'test',
+                'abc',
+                '123',
+                strict_supports=False,
+                vpc_id='vpc-12345678',
+            )
+        self.assertIn('vpc_region is required', str(ctx.exception))
 
     def test_update_r53_zones_multiple(self):
         provider, stubber = self._get_stubbed_provider()
