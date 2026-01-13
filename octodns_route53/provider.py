@@ -852,7 +852,6 @@ class Route53Provider(_AuthMixin, BaseProvider):
         '''Get list of VPCs for a zone, with caching.'''
         if self._multi_vpc_zones is None:
             self._multi_vpc_zones = {}
-        zone_id = self._normalize_zone_id(zone_id)
         if zone_id not in self._multi_vpc_zones:
             resp = self._conn.get_hosted_zone(Id=zone_id)
             self._multi_vpc_zones[zone_id] = [
