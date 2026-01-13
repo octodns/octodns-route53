@@ -814,37 +814,7 @@ class Route53Provider(_AuthMixin, BaseProvider):
             next_token = resp.get('NextToken')
             more = next_token is not None
 
-        # Apply multi-VPC filtering based on vpc_multi_action
-        if self.vpc_multi_action == 'ignore':
-            return zones
-
-        filtered = {}
-        for zone_name, zone_id in zones.items():
-            vpc_list = self._get_zone_vpcs(zone_id)
-            if len(vpc_list) > 1:
-                vpc_ids_str = ', '.join(vpc_list)
-                if self.vpc_multi_action == 'error':
-                    self.log.error(
-                        'Zone "%s" (%s) is associated with %d VPCs: %s. '
-                        'Skipping zone. Set vpc_multi_action to "warn" or '
-                        '"ignore" to manage this zone.',
-                        zone_name,
-                        zone_id,
-                        len(vpc_list),
-                        vpc_ids_str,
-                    )
-                    continue
-                else:  # warn
-                    self.log.warning(
-                        'Zone "%s" (%s) is associated with %d VPCs: %s. '
-                        'Changes will affect all VPCs.',
-                        zone_name,
-                        zone_id,
-                        len(vpc_list),
-                        vpc_ids_str,
-                    )
-            filtered[zone_name] = zone_id
-        return filtered
+        return zones
 
     @property
     def vpc_zone_ids(self):
@@ -882,6 +852,7 @@ class Route53Provider(_AuthMixin, BaseProvider):
         '''Get list of VPCs for a zone, with caching.'''
         if self._multi_vpc_zones is None:
             self._multi_vpc_zones = {}
+        zone_id = self._normalize_zone_id(zone_id)
         if zone_id not in self._multi_vpc_zones:
             resp = self._conn.get_hosted_zone(Id=zone_id)
             self._multi_vpc_zones[zone_id] = [
@@ -1889,6 +1860,30 @@ class Route53Provider(_AuthMixin, BaseProvider):
         self.log.info(
             '_apply: zone=%s, len(changes)=%d', desired.name, len(changes)
         )
+
+        # Check multi-VPC before making any changes
+        if self.vpc_id and self.vpc_multi_action != 'ignore':
+            zone_id = self._r53_zones.get(desired.name)
+            if zone_id:
+                vpc_list = self._get_zone_vpcs(zone_id)
+                if len(vpc_list) > 1:
+                    vpc_ids_str = ', '.join(vpc_list)
+                    if self.vpc_multi_action == 'error':
+                        raise Route53ProviderException(
+                            f'Zone "{desired.name}" ({zone_id}) is associated '
+                            f'with {len(vpc_list)} VPCs: {vpc_ids_str}. '
+                            f'Set vpc_multi_action to "warn" or "ignore" to '
+                            f'manage this zone.'
+                        )
+                    else:  # warn
+                        self.log.warning(
+                            'Zone "%s" (%s) is associated with %d VPCs: %s. '
+                            'Changes will affect all VPCs.',
+                            desired.name,
+                            zone_id,
+                            len(vpc_list),
+                            vpc_ids_str,
+                        )
 
         batch = []
         batch_rs_count = 0

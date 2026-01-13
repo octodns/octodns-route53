@@ -951,28 +951,10 @@ class TestRoute53Provider(TestCase):
         )
         self.assertEqual(provider.vpc_multi_action, 'error')
 
-    def test_vpc_multi_action_error_skips_multi_vpc_zone(self):
-        provider, stubber = self._get_stubbed_vpc_provider(
-            vpc_multi_action='error'
-        )
+    def test_get_zone_vpcs_caches_result(self):
+        # Test that _get_zone_vpcs() calls API and caches result
+        provider, stubber = self._get_stubbed_vpc_provider()
 
-        # Zone is in our VPC
-        stubber.add_response(
-            'list_hosted_zones_by_vpc',
-            {
-                'HostedZoneSummaries': [
-                    {
-                        'HostedZoneId': 'z42',
-                        'Name': 'unit.tests.',
-                        'Owner': {'OwningAccount': '123456789012'},
-                    }
-                ],
-                'MaxItems': '100',
-            },
-            {'VPCId': 'vpc-12345678', 'VPCRegion': 'us-east-1'},
-        )
-
-        # Zone is associated with multiple VPCs
         stubber.add_response(
             'get_hosted_zone',
             {
@@ -989,160 +971,155 @@ class TestRoute53Provider(TestCase):
             {'Id': '/hostedzone/z42'},
         )
 
-        provider.update_r53_zones("unit.tests.")
-        # Zone should be skipped (empty dict)
-        self.assertEqual(provider._r53_zones, {})
-
-    def test_vpc_multi_action_warn_includes_multi_vpc_zone(self):
-        provider, stubber = self._get_stubbed_vpc_provider(
-            vpc_multi_action='warn'
-        )
-
-        stubber.add_response(
-            'list_hosted_zones_by_vpc',
-            {
-                'HostedZoneSummaries': [
-                    {
-                        'HostedZoneId': 'z42',
-                        'Name': 'unit.tests.',
-                        'Owner': {'OwningAccount': '123456789012'},
-                    }
-                ],
-                'MaxItems': '100',
-            },
-            {'VPCId': 'vpc-12345678', 'VPCRegion': 'us-east-1'},
-        )
-
-        # Zone is associated with multiple VPCs
-        stubber.add_response(
-            'get_hosted_zone',
-            {
-                'HostedZone': {
-                    'Id': '/hostedzone/z42',
-                    'Name': 'unit.tests.',
-                    'CallerReference': 'abc',
-                },
-                'VPCs': [
-                    {'VPCId': 'vpc-12345678', 'VPCRegion': 'us-east-1'},
-                    {'VPCId': 'vpc-other', 'VPCRegion': 'us-east-1'},
-                ],
-            },
-            {'Id': '/hostedzone/z42'},
-        )
-
-        provider.update_r53_zones("unit.tests.")
-        # Zone should be included despite multi-VPC
-        self.assertEqual(
-            provider._r53_zones, {'unit.tests.': '/hostedzone/z42'}
-        )
-
-    def test_vpc_multi_action_ignore_skips_api_calls(self):
-        provider, stubber = self._get_stubbed_vpc_provider(
-            vpc_multi_action='ignore'
-        )
-
-        stubber.add_response(
-            'list_hosted_zones_by_vpc',
-            {
-                'HostedZoneSummaries': [
-                    {
-                        'HostedZoneId': 'z42',
-                        'Name': 'unit.tests.',
-                        'Owner': {'OwningAccount': '123456789012'},
-                    }
-                ],
-                'MaxItems': '100',
-            },
-            {'VPCId': 'vpc-12345678', 'VPCRegion': 'us-east-1'},
-        )
-        # Note: NO get_hosted_zone stub - would fail if called
-
-        provider.update_r53_zones("unit.tests.")
-        # Zone should be included
-        self.assertEqual(
-            provider._r53_zones, {'unit.tests.': '/hostedzone/z42'}
-        )
-
-    def test_vpc_multi_action_single_vpc_proceeds(self):
-        provider, stubber = self._get_stubbed_vpc_provider(
-            vpc_multi_action='error'
-        )
-
-        stubber.add_response(
-            'list_hosted_zones_by_vpc',
-            {
-                'HostedZoneSummaries': [
-                    {
-                        'HostedZoneId': 'z42',
-                        'Name': 'unit.tests.',
-                        'Owner': {'OwningAccount': '123456789012'},
-                    }
-                ],
-                'MaxItems': '100',
-            },
-            {'VPCId': 'vpc-12345678', 'VPCRegion': 'us-east-1'},
-        )
-
-        # Zone is associated with only our VPC
-        stubber.add_response(
-            'get_hosted_zone',
-            {
-                'HostedZone': {
-                    'Id': '/hostedzone/z42',
-                    'Name': 'unit.tests.',
-                    'CallerReference': 'abc',
-                },
-                'VPCs': [{'VPCId': 'vpc-12345678', 'VPCRegion': 'us-east-1'}],
-            },
-            {'Id': '/hostedzone/z42'},
-        )
-
-        provider.update_r53_zones("unit.tests.")
-        # Zone should be included
-        self.assertEqual(
-            provider._r53_zones, {'unit.tests.': '/hostedzone/z42'}
-        )
-
-    def test_vpc_multi_action_caching(self):
-        # Verify get_hosted_zone is only called once per zone
-        provider, stubber = self._get_stubbed_vpc_provider(
-            vpc_multi_action='error'
-        )
-
-        stubber.add_response(
-            'list_hosted_zones_by_vpc',
-            {
-                'HostedZoneSummaries': [
-                    {
-                        'HostedZoneId': 'z42',
-                        'Name': 'unit.tests.',
-                        'Owner': {'OwningAccount': '123456789012'},
-                    }
-                ],
-                'MaxItems': '100',
-            },
-            {'VPCId': 'vpc-12345678', 'VPCRegion': 'us-east-1'},
-        )
-
-        stubber.add_response(
-            'get_hosted_zone',
-            {
-                'HostedZone': {
-                    'Id': '/hostedzone/z42',
-                    'Name': 'unit.tests.',
-                    'CallerReference': 'abc',
-                },
-                'VPCs': [{'VPCId': 'vpc-12345678', 'VPCRegion': 'us-east-1'}],
-            },
-            {'Id': '/hostedzone/z42'},
-        )
-
-        provider.update_r53_zones("unit.tests.")
-
-        # Second call to _get_zone_vpcs should use cache
-        # (stubber would fail if it tried another API call)
+        # First call should hit API
         vpcs = provider._get_zone_vpcs('/hostedzone/z42')
-        self.assertEqual(vpcs, ['vpc-12345678'])
+        self.assertEqual(vpcs, ['vpc-12345678', 'vpc-other'])
+
+        # Second call should use cache (no additional stub needed)
+        vpcs = provider._get_zone_vpcs('/hostedzone/z42')
+        self.assertEqual(vpcs, ['vpc-12345678', 'vpc-other'])
+
+        # Verify cache is populated
+        self.assertEqual(
+            provider._multi_vpc_zones,
+            {'/hostedzone/z42': ['vpc-12345678', 'vpc-other']},
+        )
+
+    def test_vpc_multi_action_error_raises_for_multi_vpc_zone(self):
+        # Test that _apply() raises exception for multi-VPC zone with error mode
+        provider = Route53Provider(
+            'test',
+            'abc',
+            '123',
+            strict_supports=False,
+            vpc_id='vpc-12345678',
+            vpc_region='us-east-1',
+            vpc_multi_action='error',
+        )
+
+        # Pre-populate caches
+        provider._r53_zones = {'unit.tests.': '/hostedzone/z42'}
+        provider._multi_vpc_zones = {
+            '/hostedzone/z42': ['vpc-12345678', 'vpc-other']
+        }
+
+        # Create minimal mock plan
+        plan = Mock()
+        plan.desired.name = 'unit.tests.'
+        plan.changes = [Mock()]
+
+        # Should raise exception
+        with self.assertRaises(Route53ProviderException) as ctx:
+            provider._apply(plan)
+
+        self.assertIn('associated with 2 VPCs', str(ctx.exception))
+
+    def test_vpc_multi_action_warn_logs_warning_for_multi_vpc_zone(self):
+        # Test that _apply() logs warning for multi-VPC zone with warn mode
+        provider = Route53Provider(
+            'test',
+            'abc',
+            '123',
+            strict_supports=False,
+            vpc_id='vpc-12345678',
+            vpc_region='us-east-1',
+            vpc_multi_action='warn',
+        )
+
+        # Pre-populate caches
+        provider._r53_zones = {'unit.tests.': '/hostedzone/z42'}
+        provider._multi_vpc_zones = {
+            '/hostedzone/z42': ['vpc-12345678', 'vpc-other']
+        }
+
+        # Create minimal mock plan with no changes to avoid further processing
+        plan = Mock()
+        plan.desired.name = 'unit.tests.'
+        plan.changes = []
+
+        # Mock methods to avoid API calls
+        with patch.object(
+            provider, '_get_zone_id', return_value='/hostedzone/z42'
+        ):
+            with patch.object(provider, '_load_records', return_value={}):
+                with patch.object(provider, '_really_apply'):
+                    with patch.object(provider.log, 'warning') as mock_warn:
+                        provider._apply(plan)
+                        # Should have logged the multi-VPC warning
+                        mock_warn.assert_called_once()
+                        self.assertIn(
+                            'Changes will affect all VPCs',
+                            mock_warn.call_args[0][0],
+                        )
+
+    def test_vpc_single_vpc_no_warning(self):
+        # Test that _apply() does not warn for single-VPC zone
+        provider = Route53Provider(
+            'test',
+            'abc',
+            '123',
+            strict_supports=False,
+            vpc_id='vpc-12345678',
+            vpc_region='us-east-1',
+            vpc_multi_action='error',
+        )
+
+        # Pre-populate caches - single VPC
+        provider._r53_zones = {'unit.tests.': '/hostedzone/z42'}
+        provider._multi_vpc_zones = {'/hostedzone/z42': ['vpc-12345678']}
+
+        # Create minimal mock plan with no changes
+        plan = Mock()
+        plan.desired.name = 'unit.tests.'
+        plan.changes = []
+
+        # Mock methods to avoid API calls
+        with patch.object(
+            provider, '_get_zone_id', return_value='/hostedzone/z42'
+        ):
+            with patch.object(provider, '_load_records', return_value={}):
+                with patch.object(provider, '_really_apply'):
+                    with patch.object(provider.log, 'warning') as mock_warn:
+                        # Should not raise and should not warn
+                        provider._apply(plan)
+                        mock_warn.assert_not_called()
+
+    def test_vpc_multi_action_ignore_skips_vpc_check(self):
+        # Test that _apply() skips multi-VPC check entirely with ignore mode
+        # even when zone is associated with multiple VPCs
+        provider = Route53Provider(
+            'test',
+            'abc',
+            '123',
+            strict_supports=False,
+            vpc_id='vpc-12345678',
+            vpc_region='us-east-1',
+            vpc_multi_action='ignore',
+        )
+
+        # Pre-populate caches - zone IS multi-VPC
+        provider._r53_zones = {'unit.tests.': '/hostedzone/z42'}
+        provider._multi_vpc_zones = {
+            '/hostedzone/z42': ['vpc-12345678', 'vpc-other']
+        }
+
+        plan = Mock()
+        plan.desired.name = 'unit.tests.'
+        plan.changes = []
+
+        # Mock methods to avoid API calls
+        with patch.object(
+            provider, '_get_zone_id', return_value='/hostedzone/z42'
+        ):
+            with patch.object(provider, '_load_records', return_value={}):
+                with patch.object(provider, '_really_apply'):
+                    with patch.object(
+                        provider, '_get_zone_vpcs'
+                    ) as mock_get_vpcs:
+                        # Should not raise despite multi-VPC zone
+                        provider._apply(plan)
+                        # _get_zone_vpcs should never be called
+                        mock_get_vpcs.assert_not_called()
 
     def test_update_r53_zones_multiple(self):
         provider, stubber = self._get_stubbed_provider()
