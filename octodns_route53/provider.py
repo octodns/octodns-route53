@@ -680,6 +680,7 @@ class Route53Provider(_AuthMixin, BaseProvider):
         private=None,
         vpc_id=None,
         vpc_region=None,
+        vpc_multi_action='error',
         *args,
         **kwargs,
     ):
@@ -698,6 +699,12 @@ class Route53Provider(_AuthMixin, BaseProvider):
             if private is None:
                 private = True
 
+        # Validate vpc_multi_action
+        if vpc_multi_action not in ('error', 'warn', 'ignore'):
+            raise Route53ProviderException(
+                "vpc_multi_action must be 'error', 'warn', or 'ignore'"
+            )
+
         # Validate delegation_set_id and private compatibility
         if delegation_set_id is not None and private is True:
             raise Route53ProviderException(
@@ -711,12 +718,13 @@ class Route53Provider(_AuthMixin, BaseProvider):
         self.private = private
         self.vpc_id = vpc_id
         self.vpc_region = vpc_region
+        self.vpc_multi_action = vpc_multi_action
 
         self.log = logging.getLogger(f'Route53Provider[{id}]')
         self.log.info(
             '__init__: id=%s, access_key_id=%s, max_changes=%d, '
             'delegation_set_id=%s, get_zones_by_name=%s, vpc_id=%s, '
-            'vpc_region=%s',
+            'vpc_region=%s, vpc_multi_action=%s',
             id,
             access_key_id,
             max_changes,
@@ -724,6 +732,7 @@ class Route53Provider(_AuthMixin, BaseProvider):
             get_zones_by_name,
             vpc_id,
             vpc_region,
+            vpc_multi_action,
         )
         super().__init__(id, *args, **kwargs)
 
@@ -741,6 +750,7 @@ class Route53Provider(_AuthMixin, BaseProvider):
         self._r53_rrsets = {}
         self._health_checks = None
         self._vpc_zone_ids = None  # Cache of zone IDs associated with vpc_id
+        self._multi_vpc_zones = None  # Cache: {zone_id: [vpc_ids]}
 
     def _get_zone_id_by_name(self, name):
         # attempt to get zone by name
@@ -808,7 +818,37 @@ class Route53Provider(_AuthMixin, BaseProvider):
             next_token = resp.get('NextToken')
             more = next_token is not None
 
-        return zones
+        # Apply multi-VPC filtering based on vpc_multi_action
+        if self.vpc_multi_action == 'ignore':
+            return zones
+
+        filtered = {}
+        for zone_name, zone_id in zones.items():
+            vpc_list = self._get_zone_vpcs(zone_id)
+            if len(vpc_list) > 1:
+                vpc_ids_str = ', '.join(vpc_list)
+                if self.vpc_multi_action == 'error':
+                    self.log.error(
+                        'Zone "%s" (%s) is associated with %d VPCs: %s. '
+                        'Skipping zone. Set vpc_multi_action to "warn" or '
+                        '"ignore" to manage this zone.',
+                        zone_name,
+                        zone_id,
+                        len(vpc_list),
+                        vpc_ids_str,
+                    )
+                    continue
+                else:  # warn
+                    self.log.warning(
+                        'Zone "%s" (%s) is associated with %d VPCs: %s. '
+                        'Changes will affect all VPCs.',
+                        zone_name,
+                        zone_id,
+                        len(vpc_list),
+                        vpc_ids_str,
+                    )
+            filtered[zone_name] = zone_id
+        return filtered
 
     @property
     def vpc_zone_ids(self):
@@ -829,6 +869,17 @@ class Route53Provider(_AuthMixin, BaseProvider):
         if not zone_id.startswith('/hostedzone/'):
             zone_id = f'/hostedzone/{zone_id}'
         return zone_id in self.vpc_zone_ids
+
+    def _get_zone_vpcs(self, zone_id):
+        '''Get list of VPCs for a zone, with caching.'''
+        if self._multi_vpc_zones is None:
+            self._multi_vpc_zones = {}
+        if zone_id not in self._multi_vpc_zones:
+            resp = self._conn.get_hosted_zone(Id=zone_id)
+            self._multi_vpc_zones[zone_id] = [
+                vpc.get('VPCId') for vpc in resp.get('VPCs', [])
+            ]
+        return self._multi_vpc_zones[zone_id]
 
     def update_r53_zones(self, name):
         if self._r53_zones is None:

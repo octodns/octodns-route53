@@ -655,7 +655,9 @@ class TestRoute53Provider(TestCase):
 
         return (provider, stubber)
 
-    def _get_stubbed_vpc_provider(self, vpc_id='vpc-12345678'):
+    def _get_stubbed_vpc_provider(
+        self, vpc_id='vpc-12345678', vpc_multi_action='error'
+    ):
         provider = Route53Provider(
             'test',
             'abc',
@@ -663,6 +665,7 @@ class TestRoute53Provider(TestCase):
             strict_supports=False,
             vpc_id=vpc_id,
             vpc_region='us-east-1',
+            vpc_multi_action=vpc_multi_action,
         )
 
         # Use the stubber
@@ -852,6 +855,19 @@ class TestRoute53Provider(TestCase):
             {'VPCId': 'vpc-12345678', 'VPCRegion': 'us-east-1'},
         )
 
+        stubber.add_response(
+            'get_hosted_zone',
+            {
+                'HostedZone': {
+                    'Id': '/hostedzone/z42',
+                    'Name': 'unit.tests.',
+                    'CallerReference': 'abc',
+                },
+                'VPCs': [{'VPCId': 'vpc-12345678', 'VPCRegion': 'us-east-1'}],
+            },
+            {'Id': '/hostedzone/z42'},
+        )
+
         provider.update_r53_zones("unit.tests.")
         self.assertEqual(
             provider._r53_zones, {'unit.tests.': '/hostedzone/z42'}
@@ -896,6 +912,223 @@ class TestRoute53Provider(TestCase):
                 vpc_id='vpc-12345678',
             )
         self.assertIn('vpc_region is required', str(ctx.exception))
+
+    def test_vpc_multi_action_invalid_value_raises(self):
+        with self.assertRaises(Route53ProviderException) as ctx:
+            Route53Provider(
+                'test',
+                'abc',
+                '123',
+                strict_supports=False,
+                vpc_id='vpc-12345678',
+                vpc_region='us-east-1',
+                vpc_multi_action='invalid',
+            )
+        self.assertIn("vpc_multi_action must be", str(ctx.exception))
+
+    def test_vpc_multi_action_default_is_error(self):
+        provider = Route53Provider(
+            'test',
+            'abc',
+            '123',
+            strict_supports=False,
+            vpc_id='vpc-12345678',
+            vpc_region='us-east-1',
+        )
+        self.assertEqual(provider.vpc_multi_action, 'error')
+
+    def test_vpc_multi_action_error_skips_multi_vpc_zone(self):
+        provider, stubber = self._get_stubbed_vpc_provider(
+            vpc_multi_action='error'
+        )
+
+        # Zone is in our VPC
+        stubber.add_response(
+            'list_hosted_zones_by_vpc',
+            {
+                'HostedZoneSummaries': [
+                    {
+                        'HostedZoneId': 'z42',
+                        'Name': 'unit.tests.',
+                        'Owner': {'OwningAccount': '123456789012'},
+                    }
+                ],
+                'MaxItems': '100',
+            },
+            {'VPCId': 'vpc-12345678', 'VPCRegion': 'us-east-1'},
+        )
+
+        # Zone is associated with multiple VPCs
+        stubber.add_response(
+            'get_hosted_zone',
+            {
+                'HostedZone': {
+                    'Id': '/hostedzone/z42',
+                    'Name': 'unit.tests.',
+                    'CallerReference': 'abc',
+                },
+                'VPCs': [
+                    {'VPCId': 'vpc-12345678', 'VPCRegion': 'us-east-1'},
+                    {'VPCId': 'vpc-other', 'VPCRegion': 'us-east-1'},
+                ],
+            },
+            {'Id': '/hostedzone/z42'},
+        )
+
+        provider.update_r53_zones("unit.tests.")
+        # Zone should be skipped (empty dict)
+        self.assertEqual(provider._r53_zones, {})
+
+    def test_vpc_multi_action_warn_includes_multi_vpc_zone(self):
+        provider, stubber = self._get_stubbed_vpc_provider(
+            vpc_multi_action='warn'
+        )
+
+        stubber.add_response(
+            'list_hosted_zones_by_vpc',
+            {
+                'HostedZoneSummaries': [
+                    {
+                        'HostedZoneId': 'z42',
+                        'Name': 'unit.tests.',
+                        'Owner': {'OwningAccount': '123456789012'},
+                    }
+                ],
+                'MaxItems': '100',
+            },
+            {'VPCId': 'vpc-12345678', 'VPCRegion': 'us-east-1'},
+        )
+
+        # Zone is associated with multiple VPCs
+        stubber.add_response(
+            'get_hosted_zone',
+            {
+                'HostedZone': {
+                    'Id': '/hostedzone/z42',
+                    'Name': 'unit.tests.',
+                    'CallerReference': 'abc',
+                },
+                'VPCs': [
+                    {'VPCId': 'vpc-12345678', 'VPCRegion': 'us-east-1'},
+                    {'VPCId': 'vpc-other', 'VPCRegion': 'us-east-1'},
+                ],
+            },
+            {'Id': '/hostedzone/z42'},
+        )
+
+        provider.update_r53_zones("unit.tests.")
+        # Zone should be included despite multi-VPC
+        self.assertEqual(
+            provider._r53_zones, {'unit.tests.': '/hostedzone/z42'}
+        )
+
+    def test_vpc_multi_action_ignore_skips_api_calls(self):
+        provider, stubber = self._get_stubbed_vpc_provider(
+            vpc_multi_action='ignore'
+        )
+
+        stubber.add_response(
+            'list_hosted_zones_by_vpc',
+            {
+                'HostedZoneSummaries': [
+                    {
+                        'HostedZoneId': 'z42',
+                        'Name': 'unit.tests.',
+                        'Owner': {'OwningAccount': '123456789012'},
+                    }
+                ],
+                'MaxItems': '100',
+            },
+            {'VPCId': 'vpc-12345678', 'VPCRegion': 'us-east-1'},
+        )
+        # Note: NO get_hosted_zone stub - would fail if called
+
+        provider.update_r53_zones("unit.tests.")
+        # Zone should be included
+        self.assertEqual(
+            provider._r53_zones, {'unit.tests.': '/hostedzone/z42'}
+        )
+
+    def test_vpc_multi_action_single_vpc_proceeds(self):
+        provider, stubber = self._get_stubbed_vpc_provider(
+            vpc_multi_action='error'
+        )
+
+        stubber.add_response(
+            'list_hosted_zones_by_vpc',
+            {
+                'HostedZoneSummaries': [
+                    {
+                        'HostedZoneId': 'z42',
+                        'Name': 'unit.tests.',
+                        'Owner': {'OwningAccount': '123456789012'},
+                    }
+                ],
+                'MaxItems': '100',
+            },
+            {'VPCId': 'vpc-12345678', 'VPCRegion': 'us-east-1'},
+        )
+
+        # Zone is associated with only our VPC
+        stubber.add_response(
+            'get_hosted_zone',
+            {
+                'HostedZone': {
+                    'Id': '/hostedzone/z42',
+                    'Name': 'unit.tests.',
+                    'CallerReference': 'abc',
+                },
+                'VPCs': [{'VPCId': 'vpc-12345678', 'VPCRegion': 'us-east-1'}],
+            },
+            {'Id': '/hostedzone/z42'},
+        )
+
+        provider.update_r53_zones("unit.tests.")
+        # Zone should be included
+        self.assertEqual(
+            provider._r53_zones, {'unit.tests.': '/hostedzone/z42'}
+        )
+
+    def test_vpc_multi_action_caching(self):
+        # Verify get_hosted_zone is only called once per zone
+        provider, stubber = self._get_stubbed_vpc_provider(
+            vpc_multi_action='error'
+        )
+
+        stubber.add_response(
+            'list_hosted_zones_by_vpc',
+            {
+                'HostedZoneSummaries': [
+                    {
+                        'HostedZoneId': 'z42',
+                        'Name': 'unit.tests.',
+                        'Owner': {'OwningAccount': '123456789012'},
+                    }
+                ],
+                'MaxItems': '100',
+            },
+            {'VPCId': 'vpc-12345678', 'VPCRegion': 'us-east-1'},
+        )
+
+        stubber.add_response(
+            'get_hosted_zone',
+            {
+                'HostedZone': {
+                    'Id': '/hostedzone/z42',
+                    'Name': 'unit.tests.',
+                    'CallerReference': 'abc',
+                },
+                'VPCs': [{'VPCId': 'vpc-12345678', 'VPCRegion': 'us-east-1'}],
+            },
+            {'Id': '/hostedzone/z42'},
+        )
+
+        provider.update_r53_zones("unit.tests.")
+
+        # Second call to _get_zone_vpcs should use cache
+        # (stubber would fail if it tried another API call)
+        vpcs = provider._get_zone_vpcs('/hostedzone/z42')
+        self.assertEqual(vpcs, ['vpc-12345678'])
 
     def test_update_r53_zones_multiple(self):
         provider, stubber = self._get_stubbed_provider()
@@ -1015,6 +1248,19 @@ class TestRoute53Provider(TestCase):
             'list_hosted_zones_by_vpc',
             list_hosted_zones_by_vpc_resp,
             {'VPCId': 'vpc-12345678', 'VPCRegion': 'us-east-1'},
+        )
+
+        stubber.add_response(
+            'get_hosted_zone',
+            {
+                'HostedZone': {
+                    'Id': '/hostedzone/z41',
+                    'Name': 'unit.tests.',
+                    'CallerReference': 'abc',
+                },
+                'VPCs': [{'VPCId': 'vpc-12345678', 'VPCRegion': 'us-east-1'}],
+            },
+            {'Id': '/hostedzone/z41'},
         )
 
         provider.update_r53_zones("unit.tests.")
@@ -1435,6 +1681,32 @@ class TestRoute53Provider(TestCase):
             {'VPCId': 'vpc-12345678', 'VPCRegion': 'us-east-1'},
         )
 
+        stubber.add_response(
+            'get_hosted_zone',
+            {
+                'HostedZone': {
+                    'Id': '/hostedzone/z42',
+                    'Name': 'unit.tests.',
+                    'CallerReference': 'abc',
+                },
+                'VPCs': [{'VPCId': 'vpc-12345678', 'VPCRegion': 'us-east-1'}],
+            },
+            {'Id': '/hostedzone/z42'},
+        )
+
+        stubber.add_response(
+            'get_hosted_zone',
+            {
+                'HostedZone': {
+                    'Id': '/hostedzone/z43',
+                    'Name': 'alpha.com.',
+                    'CallerReference': 'abc',
+                },
+                'VPCs': [{'VPCId': 'vpc-12345678', 'VPCRegion': 'us-east-1'}],
+            },
+            {'Id': '/hostedzone/z43'},
+        )
+
         self.assertEqual(['alpha.com.', 'unit.tests.'], provider.list_zones())
 
     def test_list_zones_vpc_pagination(self):
@@ -1478,6 +1750,32 @@ class TestRoute53Provider(TestCase):
                 'VPCRegion': 'us-east-1',
                 'NextToken': 'token123',
             },
+        )
+
+        stubber.add_response(
+            'get_hosted_zone',
+            {
+                'HostedZone': {
+                    'Id': '/hostedzone/z42',
+                    'Name': 'unit.tests.',
+                    'CallerReference': 'abc',
+                },
+                'VPCs': [{'VPCId': 'vpc-12345678', 'VPCRegion': 'us-east-1'}],
+            },
+            {'Id': '/hostedzone/z42'},
+        )
+
+        stubber.add_response(
+            'get_hosted_zone',
+            {
+                'HostedZone': {
+                    'Id': '/hostedzone/z43',
+                    'Name': 'alpha.com.',
+                    'CallerReference': 'abc',
+                },
+                'VPCs': [{'VPCId': 'vpc-12345678', 'VPCRegion': 'us-east-1'}],
+            },
+            {'Id': '/hostedzone/z43'},
         )
 
         self.assertEqual(['alpha.com.', 'unit.tests.'], provider.list_zones())

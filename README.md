@@ -61,6 +61,14 @@ providers:
     # The region of the VPC specified in vpc_id.
     # Required when vpc_id is specified.
     #vpc_region: us-east-1
+    # What to do when a zone is associated with multiple VPCs.
+    # Changes to such zones affect DNS in ALL associated VPCs.
+    # Options:
+    #   - "error" (default): Log error and skip the zone
+    #   - "warn": Log warning but proceed with the zone
+    #   - "ignore": Silently proceed
+    # Only applies when vpc_id is specified.
+    #vpc_multi_action: error
 ```
 
 Alternatively, you may leave out access_key_id, secret_access_key and session_token.  This will result in boto3 deciding authentication dynamically.
