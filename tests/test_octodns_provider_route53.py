@@ -913,6 +913,20 @@ class TestRoute53Provider(TestCase):
             )
         self.assertIn('vpc_region is required', str(ctx.exception))
 
+    def test_normalize_zone_id(self):
+        # Test that _normalize_zone_id adds prefix when missing
+        provider = Route53Provider('test', 'abc', '123', strict_supports=False)
+        # Without prefix -> adds prefix
+        self.assertEqual(
+            '/hostedzone/Z1234567890ABC',
+            provider._normalize_zone_id('Z1234567890ABC'),
+        )
+        # With prefix -> unchanged
+        self.assertEqual(
+            '/hostedzone/Z1234567890ABC',
+            provider._normalize_zone_id('/hostedzone/Z1234567890ABC'),
+        )
+
     def test_vpc_multi_action_invalid_value_raises(self):
         with self.assertRaises(Route53ProviderException) as ctx:
             Route53Provider(

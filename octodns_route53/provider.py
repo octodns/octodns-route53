@@ -803,11 +803,7 @@ class Route53Provider(_AuthMixin, BaseProvider):
                 zone_id = zone_summary['HostedZoneId']
                 zone_name = _octal_replace(zone_summary['Name'])
 
-                # Normalize zone ID format: list_hosted_zones_by_vpc returns
-                # IDs without /hostedzone/ prefix, but list_hosted_zones
-                # returns them with it. Normalize for consistency.
-                if not zone_id.startswith('/hostedzone/'):
-                    zone_id = f'/hostedzone/{zone_id}'
+                zone_id = self._normalize_zone_id(zone_id)
 
                 if zone_name in zones:
                     raise Route53ProviderException(
@@ -862,13 +858,25 @@ class Route53Provider(_AuthMixin, BaseProvider):
             self._vpc_zone_ids = set(zones.values())
         return self._vpc_zone_ids
 
+    def _normalize_zone_id(self, zone_id):
+        '''
+        Normalize zone ID to /hostedzone/... format for consistent comparison.
+
+        AWS Route53 APIs are inconsistent with zone ID formats in responses:
+        - list_hosted_zones_by_vpc: returns IDs WITHOUT /hostedzone/ prefix
+        - list_hosted_zones_by_name: returns IDs WITH /hostedzone/ prefix
+
+        All AWS Route53 APIs accept both formats as input, so this normalization
+        is only needed for internal consistency (e.g., set membership checks).
+        We normalize to the /hostedzone/ format since it's more explicit.
+        '''
+        if not zone_id.startswith('/hostedzone/'):
+            return f'/hostedzone/{zone_id}'
+        return zone_id
+
     def _zone_has_vpc(self, zone_id):
         '''Check if a zone is associated with self.vpc_id using cached data'''
-        # Normalize zone_id format for comparison
-        # _get_zones_by_vpc() returns IDs with /hostedzone/ prefix
-        if not zone_id.startswith('/hostedzone/'):
-            zone_id = f'/hostedzone/{zone_id}'
-        return zone_id in self.vpc_zone_ids
+        return self._normalize_zone_id(zone_id) in self.vpc_zone_ids
 
     def _get_zone_vpcs(self, zone_id):
         '''Get list of VPCs for a zone, with caching.'''
