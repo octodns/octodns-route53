@@ -1192,9 +1192,7 @@ class TestRoute53Provider(TestCase):
             self._get_stubbed_get_zones_by_name_enabled_vpc_provider()
         )
 
-        # list_hosted_zones_by_name returns multiple zones
-        # z40 has /hostedzone/ prefix (tests branch where normalization is skipped)
-        # z41 has no prefix (tests branch where normalization is applied)
+        # list_hosted_zones_by_name returns zone IDs with /hostedzone/ prefix
         list_hosted_zones_by_name_resp = {
             'HostedZones': [
                 {
@@ -1205,7 +1203,7 @@ class TestRoute53Provider(TestCase):
                     'ResourceRecordSetCount': 123,
                 },
                 {
-                    'Id': 'z41',
+                    'Id': '/hostedzone/z41',
                     'Name': 'unit.tests.',
                     'CallerReference': 'abc',
                     'Config': {'Comment': 'string', 'PrivateZone': True},
@@ -1255,8 +1253,10 @@ class TestRoute53Provider(TestCase):
         )
 
         provider.update_r53_zones("unit.tests.")
-        # Zone ID comes from list_hosted_zones_by_name (without /hostedzone/ prefix)
-        self.assertEqual(provider._r53_zones, {'unit.tests.': 'z41'})
+        # Zone ID comes from list_hosted_zones_by_name (with /hostedzone/ prefix)
+        self.assertEqual(
+            provider._r53_zones, {'unit.tests.': '/hostedzone/z41'}
+        )
 
     def test_update_r53_zones_with_get_zones_by_name(self):
         (provider, stubber) = (
