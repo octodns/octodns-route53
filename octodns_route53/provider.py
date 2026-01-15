@@ -678,22 +678,61 @@ class Route53Provider(_AuthMixin, BaseProvider):
         delegation_set_id=None,
         get_zones_by_name=False,
         private=None,
+        vpc_id=None,
+        vpc_region=None,
+        vpc_multi_action='error',
         *args,
         **kwargs,
     ):
+        # Validate vpc_id configuration
+        if vpc_id is not None:
+            if vpc_region is None:
+                raise Route53ProviderException(
+                    'vpc_region is required when vpc_id is specified'
+                )
+            if private is False:
+                raise Route53ProviderException(
+                    'vpc_id cannot be used with private=False '
+                    '(VPC-associated zones are always private)'
+                )
+            # VPC zones are always private
+            if private is None:
+                private = True
+
+        # Validate vpc_multi_action
+        if vpc_multi_action not in ('error', 'warn', 'ignore'):
+            raise Route53ProviderException(
+                "vpc_multi_action must be 'error', 'warn', or 'ignore'"
+            )
+
+        # Validate delegation_set_id and private compatibility
+        if delegation_set_id is not None and private is True:
+            raise Route53ProviderException(
+                'delegation_set_id cannot be used with private zones '
+                '(delegation sets only apply to public zones)'
+            )
+
         self.max_changes = max_changes
         self.delegation_set_id = delegation_set_id
         self.get_zones_by_name = get_zones_by_name
         self.private = private
+        self.vpc_id = vpc_id
+        self.vpc_region = vpc_region
+        self.vpc_multi_action = vpc_multi_action
 
         self.log = logging.getLogger(f'Route53Provider[{id}]')
         self.log.info(
-            '__init__: id=%s, access_key_id=%s, max_changes=%d, delegation_set_id=%s, get_zones_by_name=%s',
+            '__init__: id=%s, access_key_id=%s, max_changes=%d, '
+            'delegation_set_id=%s, get_zones_by_name=%s, vpc_id=%s, '
+            'vpc_region=%s, vpc_multi_action=%s',
             id,
             access_key_id,
             max_changes,
             delegation_set_id,
             get_zones_by_name,
+            vpc_id,
+            vpc_region,
+            vpc_multi_action,
         )
         super().__init__(id, *args, **kwargs)
 
@@ -710,6 +749,8 @@ class Route53Provider(_AuthMixin, BaseProvider):
         self._r53_zones = None
         self._r53_rrsets = {}
         self._health_checks = None
+        self._vpc_zone_ids = None  # Cache of zone IDs associated with vpc_id
+        self._multi_vpc_zones = None  # Cache: {zone_id: [vpc_ids]}
 
     def _get_zone_id_by_name(self, name):
         # attempt to get zone by name
@@ -723,6 +764,12 @@ class Route53Provider(_AuthMixin, BaseProvider):
                 if self.private is not None and self.private != private_zone:
                     continue
 
+                # Filter by VPC if vpc_id is specified.
+                # Uses cached vpc_zone_ids for O(1) lookup.
+                if self.vpc_id is not None:
+                    if not self._zone_has_vpc(z['Id']):
+                        continue
+
                 # if there is a response that starts with the name
                 if _octal_replace(z['Name']).startswith(name):
                     if id is not None:
@@ -733,6 +780,85 @@ class Route53Provider(_AuthMixin, BaseProvider):
                     self.log.debug('get_zones_by_name:   id=%s', id)
         return id
 
+    def _get_zones_by_vpc(self):
+        '''
+        Returns a dict of zone_name -> zone_id for zones associated with
+        self.vpc_id. Uses list_hosted_zones_by_vpc API which requires
+        VPCId and VPCRegion.
+        '''
+        self.log.debug('_get_zones_by_vpc: vpc_id=%s', self.vpc_id)
+
+        zones = {}
+        more = True
+        next_token = None
+
+        while more:
+            params = {'VPCId': self.vpc_id, 'VPCRegion': self.vpc_region}
+            if next_token:
+                params['NextToken'] = next_token
+
+            resp = self._conn.list_hosted_zones_by_vpc(**params)
+
+            for zone_summary in resp.get('HostedZoneSummaries', []):
+                zone_id = zone_summary['HostedZoneId']
+                zone_name = _octal_replace(zone_summary['Name'])
+
+                zone_id = self._normalize_zone_id(zone_id)
+
+                if zone_name in zones:
+                    raise Route53ProviderException(
+                        f'Multiple zones named "{zone_name}" were found.'
+                    )
+                zones[zone_name] = zone_id
+
+            next_token = resp.get('NextToken')
+            more = next_token is not None
+
+        return zones
+
+    @property
+    def vpc_zone_ids(self):
+        '''
+        Returns a set of zone IDs associated with self.vpc_id.
+        Lazy-loaded on first access via list_hosted_zones_by_vpc().
+        '''
+        if self._vpc_zone_ids is None and self.vpc_id is not None:
+            self.log.debug('vpc_zone_ids: loading for vpc_id=%s', self.vpc_id)
+            zones = self._get_zones_by_vpc()
+            self._vpc_zone_ids = set(zones.values())
+        return self._vpc_zone_ids
+
+    def _normalize_zone_id(self, zone_id):
+        '''
+        Normalize zone ID to /hostedzone/... format for consistent comparison.
+
+        AWS Route53 APIs are inconsistent with zone ID formats in responses:
+        - list_hosted_zones_by_vpc: returns IDs WITHOUT /hostedzone/ prefix
+        - list_hosted_zones_by_name: returns IDs WITH /hostedzone/ prefix
+
+        All AWS Route53 APIs accept both formats as input, so this normalization
+        is only needed for internal consistency (e.g., set membership checks).
+        We normalize to the /hostedzone/ format since it's more explicit.
+        '''
+        if not zone_id.startswith('/hostedzone/'):
+            return f'/hostedzone/{zone_id}'
+        return zone_id
+
+    def _zone_has_vpc(self, zone_id):
+        '''Check if a zone is associated with self.vpc_id using cached data'''
+        return self._normalize_zone_id(zone_id) in self.vpc_zone_ids
+
+    def _get_zone_vpcs(self, zone_id):
+        '''Get list of VPCs for a zone, with caching.'''
+        if self._multi_vpc_zones is None:
+            self._multi_vpc_zones = {}
+        if zone_id not in self._multi_vpc_zones:
+            resp = self._conn.get_hosted_zone(Id=zone_id)
+            self._multi_vpc_zones[zone_id] = [
+                vpc.get('VPCId') for vpc in resp.get('VPCs', [])
+            ]
+        return self._multi_vpc_zones[zone_id]
+
     def update_r53_zones(self, name):
         if self._r53_zones is None:
             if self.get_zones_by_name:
@@ -740,6 +866,13 @@ class Route53Provider(_AuthMixin, BaseProvider):
                 zones = {}
                 zones[name] = id
                 self._r53_zones = zones
+            elif self.vpc_id is not None:
+                self.log.debug(
+                    'r53_zones: loading by vpc_id=%s, vpc_region=%s',
+                    self.vpc_id,
+                    self.vpc_region,
+                )
+                self._r53_zones = self._get_zones_by_vpc()
             else:
                 self.log.debug('r53_zones: loading')
                 zones = {}
@@ -786,8 +919,17 @@ class Route53Provider(_AuthMixin, BaseProvider):
             params = {"Name": name, "CallerReference": ref}
             if del_set:
                 params["DelegationSetId"] = del_set
-            if self.private is not None:
+
+            # Handle VPC and private zone configuration
+            if self.vpc_id is not None:
+                # When vpc_id is specified, create as private zone with VPC
+                params["VPC"] = {
+                    "VPCId": self.vpc_id,
+                    "VPCRegion": self.vpc_region,
+                }
+            elif self.private is not None:
                 params["HostedZoneConfig"] = {"PrivateZone": self.private}
+
             resp = self._conn.create_hosted_zone(**params)
             self._r53_zones[name] = id = resp['HostedZone']['Id']
         return id
@@ -1121,6 +1263,12 @@ class Route53Provider(_AuthMixin, BaseProvider):
 
     def list_zones(self):
         self.log.debug('list_zones:')
+
+        # When vpc_id is specified, use list_hosted_zones_by_vpc
+        if self.vpc_id is not None:
+            zones = self._get_zones_by_vpc()
+            return sorted(zones.keys())
+
         hosted_zones = []
         params = {}
         if self.delegation_set_id:
@@ -1711,6 +1859,30 @@ class Route53Provider(_AuthMixin, BaseProvider):
         self.log.info(
             '_apply: zone=%s, len(changes)=%d', desired.name, len(changes)
         )
+
+        # Check multi-VPC before making any changes
+        if self.vpc_id and self.vpc_multi_action != 'ignore':
+            zone_id = self._r53_zones.get(desired.name)
+            if zone_id:
+                vpc_list = self._get_zone_vpcs(zone_id)
+                if len(vpc_list) > 1:
+                    vpc_ids_str = ', '.join(vpc_list)
+                    if self.vpc_multi_action == 'error':
+                        raise Route53ProviderException(
+                            f'Zone "{desired.name}" ({zone_id}) is associated '
+                            f'with {len(vpc_list)} VPCs: {vpc_ids_str}. '
+                            f'Set vpc_multi_action to "warn" or "ignore" to '
+                            f'manage this zone.'
+                        )
+                    else:  # warn
+                        self.log.warning(
+                            'Zone "%s" (%s) is associated with %d VPCs: %s. '
+                            'Changes will affect all VPCs.',
+                            desired.name,
+                            zone_id,
+                            len(vpc_list),
+                            vpc_ids_str,
+                        )
 
         batch = []
         batch_rs_count = 0

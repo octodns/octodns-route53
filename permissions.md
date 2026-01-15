@@ -96,6 +96,38 @@ Octodns-route53 requires permissions for three AWS services:
 }
 ```
 
+### Configuration with VPC Filtering
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "route53:ListHostedZonesByVPC",
+        "route53:GetHostedZone",
+        "route53:CreateHostedZone",
+        "route53:ListResourceRecordSets",
+        "route53:ChangeResourceRecordSets",
+        "route53:ListHealthChecks",
+        "route53:CreateHealthCheck",
+        "route53:DeleteHealthCheck",
+        "route53:ChangeTagsForResource"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeVpcs"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
 ## Permissions by Use Case
 
 | Use Case | Required Permissions |
@@ -105,6 +137,7 @@ Octodns-route53 requires permissions for three AWS services:
 | **Full management** (with zone creation) | All Route53 permissions |
 | **With EC2 discovery** | Route53 permissions + `ec2:DescribeInstances` |
 | **With ELB discovery** | Route53 permissions + `elasticloadbalancing:DescribeLoadBalancers`, `elasticloadbalancing:DescribeTags` |
+| **With VPC filtering** | Route53 permissions + `route53:ListHostedZonesByVPC`, `route53:GetHostedZone`, `ec2:DescribeVpcs` |
 
 ## Route53 Permissions (required)
 
@@ -183,6 +216,25 @@ These permissions are only required if you use `ElbSource` to automatically disc
 - **Method**: `ElbSource.lbs`
 - **Usage**: Retrieves tags associated with load balancers
 - **Context**: Enables identification of FQDNs from load balancer tags
+
+## VPC Filtering Permissions (optional)
+
+These permissions are only required if you use `vpc_id` to filter zones by VPC association.
+
+#### `route53:ListHostedZonesByVPC`
+- **Method**: `Route53Provider._get_zones_by_vpc()`
+- **Usage**: Lists hosted zones associated with a specific VPC
+- **Context**: Enables filtering of zones to only those associated with a given VPC
+
+#### `route53:GetHostedZone`
+- **Method**: `Route53Provider._get_zone_vpcs()`
+- **Usage**: Retrieves detailed information about a hosted zone including VPC associations
+- **Context**: Required when `vpc_multi_action` is set to "error" or "warn" to check if a zone is associated with multiple VPCs
+
+#### `ec2:DescribeVpcs`
+- **Method**: Called by AWS internally when invoking `ListHostedZonesByVPC`
+- **Usage**: AWS uses this to verify the VPC exists before listing associated zones
+- **Context**: Required by AWS as a prerequisite for `ListHostedZonesByVPC`
 
 ## Important Notes
 
