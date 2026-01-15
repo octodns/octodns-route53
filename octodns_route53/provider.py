@@ -846,7 +846,7 @@ class Route53Provider(_AuthMixin, BaseProvider):
 
     def _zone_has_vpc(self, zone_id):
         '''Check if a zone is associated with self.vpc_id using cached data'''
-        return zone_id in self.vpc_zone_ids
+        return self._normalize_zone_id(zone_id) in self.vpc_zone_ids
 
     def _get_zone_vpcs(self, zone_id):
         '''Get list of VPCs for a zone, with caching.'''
