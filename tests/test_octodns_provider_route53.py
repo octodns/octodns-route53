@@ -1152,7 +1152,7 @@ class TestRoute53Provider(TestCase):
             provider.update_r53_zones("unit.tests.")
 
     def test_get_r53_private_zones_with_get_zones_by_name(self):
-        (provider, stubber) = (
+        provider, stubber = (
             self._get_stubbed_get_zones_by_name_enabled_private_provider()
         )
 
@@ -1188,7 +1188,7 @@ class TestRoute53Provider(TestCase):
         self.assertEqual(provider._r53_zones, {'unit.tests.': 'z41'})
 
     def test_get_r53_vpc_zones_with_get_zones_by_name(self):
-        (provider, stubber) = (
+        provider, stubber = (
             self._get_stubbed_get_zones_by_name_enabled_vpc_provider()
         )
 
@@ -1259,7 +1259,7 @@ class TestRoute53Provider(TestCase):
         )
 
     def test_update_r53_zones_with_get_zones_by_name(self):
-        (provider, stubber) = (
+        provider, stubber = (
             self._get_stubbed_get_zones_by_name_enabled_provider()
         )
 
@@ -1313,7 +1313,7 @@ class TestRoute53Provider(TestCase):
         )
 
     def test_update_r53_zones_with_get_zones_by_name_octal_replaced(self):
-        (provider, stubber) = (
+        provider, stubber = (
             self._get_stubbed_get_zones_by_name_enabled_provider()
         )
 
@@ -3336,7 +3336,7 @@ class TestRoute53Provider(TestCase):
         stubber.assert_no_pending_responses()
 
     def test_no_changes_with_get_zones_by_name(self):
-        (provider, stubber) = (
+        provider, stubber = (
             self._get_stubbed_get_zones_by_name_enabled_provider()
         )
 
@@ -3397,7 +3397,7 @@ class TestRoute53Provider(TestCase):
         stubber.assert_no_pending_responses()
 
     def test_zone_not_found_get_zones_by_name(self):
-        (provider, stubber) = (
+        provider, stubber = (
             self._get_stubbed_get_zones_by_name_enabled_provider()
         )
 
@@ -3430,7 +3430,7 @@ class TestRoute53Provider(TestCase):
         stubber.assert_no_pending_responses()
 
     def test_get_zones_by_name_mutiple_zone_exists(self):
-        (provider, stubber) = (
+        provider, stubber = (
             self._get_stubbed_get_zones_by_name_enabled_provider()
         )
 
@@ -3486,7 +3486,7 @@ class TestRoute53Provider(TestCase):
             provider.plan(self.expected)
 
     def test_plan_apply_with_get_zones_by_name_zone_not_exists(self):
-        (provider, stubber) = (
+        provider, stubber = (
             self._get_stubbed_get_zones_by_name_enabled_provider()
         )
 
@@ -3579,7 +3579,7 @@ class TestRoute53Provider(TestCase):
         stubber.assert_no_pending_responses()
 
     def test_plan_apply_with_get_zones_by_name_zone_exists(self):
-        (provider, stubber) = (
+        provider, stubber = (
             self._get_stubbed_get_zones_by_name_enabled_provider()
         )
 
