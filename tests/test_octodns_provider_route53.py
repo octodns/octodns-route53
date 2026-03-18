@@ -5271,7 +5271,6 @@ class TestRoute53Provider(TestCase):
         )
 
         provider._apply(plan)
-        self.assertEqual('col-1234', provider._current_cidr_collection_id)
         stubber.assert_no_pending_responses()
 
     def test_mod_Update_set_math(self):

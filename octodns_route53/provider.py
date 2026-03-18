@@ -833,7 +833,6 @@ class Route53Provider(_AuthMixin, BaseProvider):
         self._vpc_zone_ids = None  # Cache of zone IDs associated with vpc_id
         self._multi_vpc_zones = None  # Cache: {zone_id: [vpc_ids]}
         self._cidr_collections = {}  # Cache: collection_id -> {loc: [cidrs]}
-        self._current_cidr_collection_id = None
 
     def _get_zone_id_by_name(self, name):
         # attempt to get zone by name
@@ -1840,30 +1839,36 @@ class Route53Provider(_AuthMixin, BaseProvider):
                     )
                     self._conn.delete_health_check(HealthCheckId=id)
 
-    def _gen_records(self, record, zone_id, creating=False):
+    def _gen_records(self, record, zone_id, creating=False, collection_id=None):
         '''
         Turns an octodns.Record into one or more `_Route53*`s
         '''
-        collection_id = getattr(self, '_current_cidr_collection_id', None)
         return _Route53Record.new(
             self, record, zone_id, creating, collection_id=collection_id
         )
 
-    def _mod_Create(self, change, zone_id, existing_rrsets):
+    def _mod_Create(self, change, zone_id, existing_rrsets, collection_id=None):
         # New is the stuff that needs to be created
-        new_records = self._gen_records(change.new, zone_id, creating=True)
+        new_records = self._gen_records(
+            change.new, zone_id, creating=True, collection_id=collection_id
+        )
         # Now is a good time to clear out any unused health checks since we
         # know what we'll be using going forward
         self._gc_health_checks(change.new, new_records)
         return self._gen_mods('CREATE', new_records, existing_rrsets)
 
-    def _mod_Update(self, change, zone_id, existing_rrsets):
+    def _mod_Update(self, change, zone_id, existing_rrsets, collection_id=None):
         # See comments in _Route53Record for how the set math is made to do our
         # bidding here.
         existing_records = self._gen_records(
-            change.existing, zone_id, creating=False
+            change.existing,
+            zone_id,
+            creating=False,
+            collection_id=collection_id,
         )
-        new_records = self._gen_records(change.new, zone_id, creating=True)
+        new_records = self._gen_records(
+            change.new, zone_id, creating=True, collection_id=collection_id
+        )
         # Now is a good time to clear out any unused health checks since we
         # know what we'll be using going forward
         self._gc_health_checks(change.new, new_records)
@@ -1887,10 +1892,13 @@ class Route53Provider(_AuthMixin, BaseProvider):
             + self._gen_mods('UPSERT', upserts, existing_rrsets)
         )
 
-    def _mod_Delete(self, change, zone_id, existing_rrsets):
+    def _mod_Delete(self, change, zone_id, existing_rrsets, collection_id=None):
         # Existing is the thing that needs to be deleted
         existing_records = self._gen_records(
-            change.existing, zone_id, creating=False
+            change.existing,
+            zone_id,
+            creating=False,
+            collection_id=collection_id,
         )
         # Now is a good time to clear out all the health checks since we know
         # we're done with them
@@ -2099,7 +2107,7 @@ class Route53Provider(_AuthMixin, BaseProvider):
                         )
 
         # Ensure CIDR collection exists if any desired records use subnets
-        self._current_cidr_collection_id = None
+        collection_id = None
         desired_locations = {}
         for record in desired.records:
             if not getattr(record, 'dynamic', False):
@@ -2111,7 +2119,6 @@ class Route53Provider(_AuthMixin, BaseProvider):
         if desired_locations:
             collection_id = self._get_or_create_cidr_collection(desired.name)
             self._sync_cidr_locations(collection_id, desired_locations)
-            self._current_cidr_collection_id = collection_id
 
         batch = []
         batch_rs_count = 0
@@ -2127,7 +2134,7 @@ class Route53Provider(_AuthMixin, BaseProvider):
                     c = Update(new, new)
             klass = c.__class__.__name__
             mod_type = getattr(self, f'_mod_{klass}')
-            mods = mod_type(c, zone_id, existing_rrsets)
+            mods = mod_type(c, zone_id, existing_rrsets, collection_id)
 
             # Order our mods to make sure targets exist before alises point to
             # them and we CRUD in the desired order
