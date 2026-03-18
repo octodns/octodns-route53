@@ -64,7 +64,9 @@ class _Route53Record(EqualityTupleMixin):
         )
 
     @classmethod
-    def _new_dynamic(cls, provider, record, hosted_zone_id, creating):
+    def _new_dynamic(
+        cls, provider, record, hosted_zone_id, creating, collection_id=None
+    ):
         # Creates the RRSets that correspond to the given dynamic record
         ret = set()
 
@@ -150,7 +152,21 @@ class _Route53Record(EqualityTupleMixin):
         for i, rule in enumerate(record.dynamic.rules):
             pool_name = rule.data['pool']
             geos = rule.data.get('geos', [])
-            if geos:
+            subnets = rule.data.get('subnets', [])
+            if subnets:
+                # Create a CidrRoutingConfig RRSet for subnet-based routing
+                ret.add(
+                    _Route53DynamicSubnetRule(
+                        provider,
+                        hosted_zone_id,
+                        record,
+                        pool_name,
+                        i,
+                        creating,
+                        collection_id,
+                    )
+                )
+            elif geos:
                 for geo in geos:
                     # Create a RRSet for each geo in each rule that uses the
                     # desired target pool
@@ -167,8 +183,8 @@ class _Route53Record(EqualityTupleMixin):
                     )
             else:
                 # There's no geo's for this rule so it's the catchall that will
-                # just point things that don't match any geo rules to the
-                # specified pool
+                # just point things that don't match any geo or subnet rules to
+                # the specified pool
                 ret.add(
                     _Route53DynamicRule(
                         provider, hosted_zone_id, record, pool_name, i, creating
@@ -178,11 +194,19 @@ class _Route53Record(EqualityTupleMixin):
         return ret
 
     @classmethod
-    def new(cls, provider, record, hosted_zone_id, creating):
+    def new(
+        cls, provider, record, hosted_zone_id, creating, collection_id=None
+    ):
         # Creates the RRSets that correspond to the given record
 
         if getattr(record, 'dynamic', False):
-            ret = cls._new_dynamic(provider, record, hosted_zone_id, creating)
+            ret = cls._new_dynamic(
+                provider,
+                record,
+                hosted_zone_id,
+                creating,
+                collection_id=collection_id,
+            )
             return ret
         elif record._type == Route53AliasRecord._type:
             return cls._new_route53_alias(
@@ -469,6 +493,59 @@ class _Route53DynamicRule(_Route53Record):
         return f'_Route53DynamicRule<{self.fqdn} {self._type} {self.index} {self.geo} {self.target_dns_name}>'
 
 
+class _Route53DynamicSubnetRule(_Route53Record):
+    def __init__(
+        self,
+        provider,
+        hosted_zone_id,
+        record,
+        pool_name,
+        index,
+        creating,
+        collection_id,
+    ):
+        super().__init__(provider, record, creating)
+
+        self.hosted_zone_id = hosted_zone_id
+        self.pool_name = pool_name
+        self.index = index
+        self.collection_id = collection_id
+
+        self.target_dns_name = f'_octodns-{pool_name}-pool.{record.fqdn}'
+
+    @property
+    def identifer(self):
+        return f'{self.index}-{self.pool_name}-subnet'
+
+    def mod(self, action, existing_rrsets):
+        return {
+            'Action': action,
+            'ResourceRecordSet': {
+                'AliasTarget': {
+                    'DNSName': self.target_dns_name,
+                    'EvaluateTargetHealth': True,
+                    'HostedZoneId': self.hosted_zone_id,
+                },
+                'CidrRoutingConfig': {
+                    'CollectionId': self.collection_id,
+                    'LocationName': f'r{self.index}',
+                },
+                'Name': self.fqdn,
+                'SetIdentifier': self.identifer,
+                'Type': self._type,
+            },
+        }
+
+    def __hash__(self):
+        return f'{self.fqdn}:{self._type}:{self.identifer}'.__hash__()
+
+    def __repr__(self):
+        return (
+            f'_Route53DynamicSubnetRule<{self.fqdn} {self._type}'
+            f' {self.index} {self.target_dns_name}>'
+        )
+
+
 class _Route53DynamicValue(_Route53Record):
     def __init__(
         self,
@@ -572,7 +649,10 @@ def _mod_keyer(mod):
     # dependency order, we just rely on that.
 
     # Get the unique ID from the name/id to get a consistent ordering.
-    if rrset.get('GeoLocation', False):
+    is_rule = rrset.get('GeoLocation', False) or rrset.get(
+        'CidrRoutingConfig', False
+    )
+    if is_rule:
         unique_id = rrset['SetIdentifier']
     else:
         if 'SetIdentifier' in rrset:
@@ -581,8 +661,8 @@ def _mod_keyer(mod):
             unique_id = rrset['Name']
 
     # Prioritise within the action_priority, ensuring targets come first.
-    if rrset.get('GeoLocation', False):
-        # Geos reference pools, so they come last.
+    if is_rule:
+        # Geos/subnets reference pools, so they come last.
         record_priority = 3
     elif rrset.get('AliasTarget', False):
         # We use an alias
@@ -641,6 +721,7 @@ class Route53Provider(_AuthMixin, BaseProvider):
 
     SUPPORTS_GEO = True
     SUPPORTS_DYNAMIC = True
+    SUPPORTS_DYNAMIC_SUBNETS = True
     SUPPORTS_POOL_VALUE_STATUS = True
     SUPPORTS_ROOT_NS = True
     SUPPORTS = set(
@@ -751,6 +832,8 @@ class Route53Provider(_AuthMixin, BaseProvider):
         self._health_checks = None
         self._vpc_zone_ids = None  # Cache of zone IDs associated with vpc_id
         self._multi_vpc_zones = None  # Cache: {zone_id: [vpc_ids]}
+        self._cidr_collections = {}  # Cache: collection_id -> {loc: [cidrs]}
+        self._current_cidr_collection_id = None
 
     def _get_zone_id_by_name(self, name):
         # attempt to get zone by name
@@ -1105,13 +1188,97 @@ class Route53Provider(_AuthMixin, BaseProvider):
 
         return self._r53_rrsets[zone_id]
 
+    @staticmethod
+    def _cidr_collection_name(zone_name):
+        # Remove trailing dot and replace dots with dashes for a valid name
+        return f'octodns-{zone_name.rstrip(".").replace(".", "-")}'
+
+    def _get_cidr_collection(self, zone_name):
+        name = self._cidr_collection_name(zone_name)
+        more = True
+        params = {}
+        while more:
+            resp = self._conn.list_cidr_collections(**params)
+            for collection in resp['CidrCollections']:
+                if collection['Name'] == name:
+                    return collection['Id']
+            more = 'NextToken' in resp
+            if more:
+                params['NextToken'] = resp['NextToken']
+        return None
+
+    def _create_cidr_collection(self, zone_name):
+        name = self._cidr_collection_name(zone_name)
+        resp = self._conn.create_cidr_collection(
+            Name=name, CallerReference=uuid4().hex
+        )
+        return resp['Collection']['Id']
+
+    def _get_or_create_cidr_collection(self, zone_name):
+        collection_id = self._get_cidr_collection(zone_name)
+        if collection_id is None:
+            collection_id = self._create_cidr_collection(zone_name)
+        return collection_id
+
+    def _load_cidr_blocks(self, collection_id):
+        if collection_id in self._cidr_collections:
+            return self._cidr_collections[collection_id]
+
+        blocks = defaultdict(list)
+        more = True
+        params = {'CollectionId': collection_id}
+        while more:
+            resp = self._conn.list_cidr_blocks(**params)
+            for item in resp['CidrBlocks']:
+                blocks[item['LocationName']].append(item['CidrBlock'])
+            more = 'NextToken' in resp
+            if more:
+                params['NextToken'] = resp['NextToken']
+
+        result = dict(blocks)
+        self._cidr_collections[collection_id] = result
+        return result
+
+    def _sync_cidr_locations(self, collection_id, desired_locations):
+        existing = self._load_cidr_blocks(collection_id)
+        changes = []
+
+        # Add/update desired locations
+        for loc_name, cidrs in desired_locations.items():
+            existing_cidrs = sorted(existing.get(loc_name, []))
+            if sorted(cidrs) != existing_cidrs:
+                # PUT replaces the location's blocks
+                changes.append(
+                    {
+                        'LocationName': loc_name,
+                        'Action': 'PUT',
+                        'CidrList': sorted(cidrs),
+                    }
+                )
+
+        # Remove locations that are no longer needed
+        for loc_name in existing:
+            if loc_name not in desired_locations:
+                changes.append(
+                    {
+                        'LocationName': loc_name,
+                        'Action': 'DELETE_IF_EXISTS',
+                        'CidrList': sorted(existing[loc_name]),
+                    }
+                )
+
+        if changes:
+            self._conn.change_cidr_collection(Id=collection_id, Changes=changes)
+            # Invalidate cache
+            self._cidr_collections.pop(collection_id, None)
+
     def _data_for_dynamic(self, name, _type, rrsets):
         # This converts a bunch of RRSets into their corresponding dynamic
         # Record. It's used by populate.
         pools = defaultdict(lambda: {'values': []})
         # Data to build our rules will be collected here and "converted" into
         # their final form below
-        rules = defaultdict(lambda: {'pool': None, 'geos': []})
+        rules = defaultdict(lambda: {'pool': None, 'geos': [], 'subnets': []})
         # Base/empty data
         data = {'dynamic': {'pools': pools, 'rules': []}}
 
@@ -1136,6 +1303,16 @@ class Route53Provider(_AuthMixin, BaseProvider):
                     # we'll record
                     if fallback_name != 'default':
                         pools[pool_name]['fallback'] = fallback_name
+            elif 'CidrRoutingConfig' in rrset:
+                # These are subnet rules
+                _id = rrset['SetIdentifier']
+                i = int(_id.split('-', 1)[0])
+                target_pool = _parse_pool_name(rrset['AliasTarget']['DNSName'])
+                rules[i]['pool'] = target_pool
+                collection_id = rrset['CidrRoutingConfig']['CollectionId']
+                location_name = rrset['CidrRoutingConfig']['LocationName']
+                cidr_blocks = self._load_cidr_blocks(collection_id)
+                rules[i]['subnets'] = sorted(cidr_blocks.get(location_name, []))
             elif 'GeoLocation' in rrset:
                 # These are rules
                 _id = rrset['SetIdentifier']
@@ -1184,6 +1361,9 @@ class Route53Provider(_AuthMixin, BaseProvider):
         # the data
         for _, rule in sorted(rules.items()):
             r = {'pool': rule['pool']}
+            subnets = sorted(rule.get('subnets', []))
+            if subnets:
+                r['subnets'] = subnets
             geos = sorted(rule['geos'])
             if geos:
                 r['geos'] = geos
@@ -1664,7 +1844,10 @@ class Route53Provider(_AuthMixin, BaseProvider):
         '''
         Turns an octodns.Record into one or more `_Route53*`s
         '''
-        return _Route53Record.new(self, record, zone_id, creating)
+        collection_id = getattr(self, '_current_cidr_collection_id', None)
+        return _Route53Record.new(
+            self, record, zone_id, creating, collection_id=collection_id
+        )
 
     def _mod_Create(self, change, zone_id, existing_rrsets):
         # New is the stuff that needs to be created
@@ -1786,6 +1969,37 @@ class Route53Provider(_AuthMixin, BaseProvider):
         fqdn = record.fqdn
         _type = record._type
 
+        # Check for CIDR location drift
+        for rrset in self._load_records(zone_id):
+            if 'CidrRoutingConfig' in rrset and rrset.get(
+                'AliasTarget', {}
+            ).get('DNSName', '').startswith('_octodns-'):
+                # Found an existing CIDR rule, check if it belongs to this
+                # record by seeing if the alias target ends with our fqdn
+                target = rrset['AliasTarget']['DNSName']
+                if not target.endswith(f'.{fqdn}'):
+                    continue
+                if _type != rrset['Type']:
+                    continue
+                collection_id = rrset['CidrRoutingConfig']['CollectionId']
+                location_name = rrset['CidrRoutingConfig']['LocationName']
+                cidr_blocks = self._load_cidr_blocks(collection_id)
+                existing_cidrs = sorted(cidr_blocks.get(location_name, []))
+                # Find the matching rule by index from SetIdentifier
+                _id = rrset['SetIdentifier']
+                i = int(_id.split('-', 1)[0])
+                rules = record.dynamic.rules
+                if i < len(rules):
+                    desired_cidrs = sorted(rules[i].data.get('subnets', []))
+                    if existing_cidrs != desired_cidrs:
+                        self.log.info(
+                            '_extra_changes_dynamic_needs_update: '
+                            'cidr-location caused update of %s:%s',
+                            record.fqdn,
+                            record._type,
+                        )
+                        return True
+
         # map values to statuses
         statuses = {}
         for pool in record.dynamic.pools.values():
@@ -1883,6 +2097,21 @@ class Route53Provider(_AuthMixin, BaseProvider):
                             len(vpc_list),
                             vpc_ids_str,
                         )
+
+        # Ensure CIDR collection exists if any desired records use subnets
+        self._current_cidr_collection_id = None
+        desired_locations = {}
+        for record in desired.records:
+            if not getattr(record, 'dynamic', False):
+                continue
+            for i, rule in enumerate(record.dynamic.rules):
+                subnets = rule.data.get('subnets', [])
+                if subnets:
+                    desired_locations[f'r{i}'] = sorted(subnets)
+        if desired_locations:
+            collection_id = self._get_or_create_cidr_collection(desired.name)
+            self._sync_cidr_locations(collection_id, desired_locations)
+            self._current_cidr_collection_id = collection_id
 
         batch = []
         batch_rs_count = 0
