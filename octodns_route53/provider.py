@@ -2174,7 +2174,6 @@ class Route53Provider(_AuthMixin, BaseProvider):
                     desired_locations[f'r{i}'] = sorted(subnets)
         if desired_locations:
             collection_id = self._get_or_create_cidr_collection(desired.name)
-            self._sync_cidr_locations(collection_id, desired_locations)
 
         if collection_id is None:
             # Check if any existing records being deleted/updated use
@@ -2190,6 +2189,11 @@ class Route53Provider(_AuthMixin, BaseProvider):
                             break
                     if collection_id is not None:
                         break
+
+        if collection_id is not None:
+            self._sync_cidr_locations(collection_id, desired_locations)
+            if not desired_locations:
+                self._conn.delete_cidr_collection(Id=collection_id)
 
         batch = []
         batch_rs_count = 0

@@ -5468,6 +5468,15 @@ class TestRoute53Provider(TestCase):
                 ]
             },
         )
+        # Stub: list_cidr_blocks (existing locations in collection)
+        stubber.add_response(
+            'list_cidr_blocks',
+            {'CidrBlocks': [{'CidrBlock': '10.0.0.0/8', 'LocationName': 'r0'}]},
+        )
+        # Stub: change_cidr_collection (delete stale location)
+        stubber.add_response('change_cidr_collection', {'Id': 'change-cidr-1'})
+        # Stub: delete_cidr_collection (remove empty collection)
+        stubber.add_response('delete_cidr_collection', {})
         # Stub: load_records (existing rrsets)
         stubber.add_response(
             'list_resource_record_sets',
