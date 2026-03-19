@@ -1605,6 +1605,37 @@ class TestRoute53Provider(TestCase):
             str(ctx.exception),
         )
 
+        # mixed geo and subnet rules
+        desired = Zone('unit.tests.', [])
+        record = Record.new(
+            desired,
+            'a',
+            {
+                'ttl': 30,
+                'type': 'A',
+                'value': '1.2.3.4',
+                'dynamic': {
+                    'pools': {
+                        'one': {'values': [{'value': '1.2.3.4'}]},
+                        'two': {'values': [{'value': '2.2.3.4'}]},
+                    },
+                    'rules': [
+                        {'subnets': ['10.0.0.0/8'], 'pool': 'one'},
+                        {'geos': ['EU', 'NA-US-OR'], 'pool': 'two'},
+                        {'pool': 'one'},
+                    ],
+                },
+            },
+        )
+        desired.add_record(record)
+        with self.assertRaises(SupportsException) as ctx:
+            provider._process_desired_zone(desired)
+        self.assertEqual(
+            'test: mixed geo and subnet rules not supported '
+            'for a.unit.tests.',
+            str(ctx.exception),
+        )
+
     # with fallback boto makes an unstubbed call to the 169. metadata api, this
     # stubs that bit out
     @patch('botocore.credentials.CredentialResolver.load_credentials')
