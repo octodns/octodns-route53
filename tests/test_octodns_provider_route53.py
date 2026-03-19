@@ -412,9 +412,9 @@ dynamic_subnet_rrsets = [
             'EvaluateTargetHealth': True,
             'HostedZoneId': 'Z2',
         },
-        'GeoLocation': {'CountryCode': '*'},
+        'CidrRoutingConfig': {'CollectionId': 'col-1234', 'LocationName': '*'},
         'Name': 'unit.tests.',
-        'SetIdentifier': '1-external-None',
+        'SetIdentifier': '1-external-subnet',
         'Type': 'A',
     },
 ]
@@ -4803,7 +4803,7 @@ class TestRoute53Provider(TestCase):
                     {
                         'LocationName': 'r0',
                         'Action': 'PUT',
-                        'CidrList': ['10.0.0.0/8', '172.16.0.0/12'],
+                        'CidrList': ['172.16.0.0/12'],
                     },
                     {
                         'LocationName': 'r1',
@@ -4818,6 +4818,69 @@ class TestRoute53Provider(TestCase):
         provider._sync_cidr_locations('col-1234', desired)
 
         # Cache should be invalidated
+        self.assertNotIn('col-1234', provider._cidr_collections)
+        stubber.assert_no_pending_responses()
+
+    def test_sync_cidr_locations_replace_blocks(self):
+        provider, stubber = self._get_stubbed_provider()
+
+        # r0 has old blocks that need full replacement
+        provider._cidr_collections = {
+            'col-1234': {'r0': ['40.71.0.0/16', '10.0.0.0/8']}
+        }
+
+        stubber.add_response(
+            'change_cidr_collection',
+            {'Id': 'change-id-1234'},
+            {
+                'Id': 'col-1234',
+                'Changes': [
+                    {
+                        'LocationName': 'r0',
+                        'Action': 'DELETE_IF_EXISTS',
+                        'CidrList': ['10.0.0.0/8', '40.71.0.0/16'],
+                    },
+                    {
+                        'LocationName': 'r0',
+                        'Action': 'PUT',
+                        'CidrList': ['97.120.173.0/24'],
+                    },
+                ],
+            },
+        )
+
+        desired = {'r0': ['97.120.173.0/24']}
+        provider._sync_cidr_locations('col-1234', desired)
+
+        self.assertNotIn('col-1234', provider._cidr_collections)
+        stubber.assert_no_pending_responses()
+
+    def test_sync_cidr_locations_remove_blocks(self):
+        provider, stubber = self._get_stubbed_provider()
+
+        # r0 has extra blocks that need removing, no new ones to add
+        provider._cidr_collections = {
+            'col-1234': {'r0': ['10.0.0.0/8', '172.16.0.0/12']}
+        }
+
+        stubber.add_response(
+            'change_cidr_collection',
+            {'Id': 'change-id-1234'},
+            {
+                'Id': 'col-1234',
+                'Changes': [
+                    {
+                        'LocationName': 'r0',
+                        'Action': 'DELETE_IF_EXISTS',
+                        'CidrList': ['172.16.0.0/12'],
+                    }
+                ],
+            },
+        )
+
+        desired = {'r0': ['10.0.0.0/8']}
+        provider._sync_cidr_locations('col-1234', desired)
+
         self.assertNotIn('col-1234', provider._cidr_collections)
         stubber.assert_no_pending_responses()
 
@@ -4940,6 +5003,7 @@ class TestRoute53Provider(TestCase):
         record = Record.new(zone, '', subnet_record_data)
 
         # RRsets that include a CidrRoutingConfig pointing to this record
+        # plus a default catchall with LocationName '*'
         rrsets = [
             {
                 'AliasTarget': {
@@ -4954,7 +5018,21 @@ class TestRoute53Provider(TestCase):
                 'Name': 'unit.tests.',
                 'SetIdentifier': '0-internal-subnet',
                 'Type': 'A',
-            }
+            },
+            {
+                'AliasTarget': {
+                    'DNSName': '_octodns-external-pool.unit.tests.',
+                    'EvaluateTargetHealth': True,
+                    'HostedZoneId': 'Z2',
+                },
+                'CidrRoutingConfig': {
+                    'CollectionId': 'col-1234',
+                    'LocationName': '*',
+                },
+                'Name': 'unit.tests.',
+                'SetIdentifier': '1-external-subnet',
+                'Type': 'A',
+            },
         ]
 
         provider._r53_rrsets = {'z44': rrsets}
@@ -5017,9 +5095,27 @@ class TestRoute53Provider(TestCase):
             }
         ]
 
+        # Add default catchall with LocationName '*'
+        rrsets.append(
+            {
+                'AliasTarget': {
+                    'DNSName': '_octodns-external-pool.unit.tests.',
+                    'EvaluateTargetHealth': True,
+                    'HostedZoneId': 'Z2',
+                },
+                'CidrRoutingConfig': {
+                    'CollectionId': 'col-1234',
+                    'LocationName': '*',
+                },
+                'Name': 'unit.tests.',
+                'SetIdentifier': '1-external-subnet',
+                'Type': 'A',
+            }
+        )
+
         provider._r53_rrsets = {'z44': rrsets}
 
-        # No drift - same subnets
+        # No drift - same subnets, default catchall is skipped
         result = provider._extra_changes_dynamic_needs_update('z44', record)
         self.assertFalse(result)
 
@@ -5853,32 +5949,53 @@ class TestRoute53Records(TestCase):
 
         # Should have:
         # 1 default pool + 2 pool values + 2 pool primaries + 2 pool
-        # secondaries + 1 subnet rule + 1 geo catchall = 9
+        # secondaries + 1 subnet rule + 1 subnet catchall = 9
         self.assertEqual(9, len(route53_records))
 
-        # Verify there's a CidrRoutingConfig mod
+        # Verify there are 2 CidrRoutingConfig mods (subnet rule + catchall)
         cidr_mods = [
             m
             for m in expected_mods
             if 'CidrRoutingConfig' in m['ResourceRecordSet']
         ]
-        self.assertEqual(1, len(cidr_mods))
-        cidr_rrset = cidr_mods[0]['ResourceRecordSet']
+        self.assertEqual(2, len(cidr_mods))
+
+        # Find the subnet rule and the catchall by LocationName
+        subnet_rule = [
+            m
+            for m in cidr_mods
+            if m['ResourceRecordSet']['CidrRoutingConfig']['LocationName']
+            != '*'
+        ]
+        catchall = [
+            m
+            for m in cidr_mods
+            if m['ResourceRecordSet']['CidrRoutingConfig']['LocationName']
+            == '*'
+        ]
+        self.assertEqual(1, len(subnet_rule))
+        self.assertEqual(1, len(catchall))
+
+        cidr_rrset = subnet_rule[0]['ResourceRecordSet']
         self.assertEqual(
             {'CollectionId': 'col-1234', 'LocationName': 'r0'},
             cidr_rrset['CidrRoutingConfig'],
         )
         self.assertEqual('0-internal-subnet', cidr_rrset['SetIdentifier'])
 
-        # Verify the catchall geo rule still exists
+        # Verify the catchall uses CidrRoutingConfig with LocationName '*'
+        catchall_rrset = catchall[0]['ResourceRecordSet']
+        self.assertEqual(
+            {'CollectionId': 'col-1234', 'LocationName': '*'},
+            catchall_rrset['CidrRoutingConfig'],
+        )
+        self.assertEqual('1-external-subnet', catchall_rrset['SetIdentifier'])
+
+        # Verify no GeoLocation mods exist (all routing is CIDR-based)
         geo_mods = [
             m for m in expected_mods if 'GeoLocation' in m['ResourceRecordSet']
         ]
-        self.assertEqual(1, len(geo_mods))
-        self.assertEqual(
-            {'CountryCode': '*'},
-            geo_mods[0]['ResourceRecordSet']['GeoLocation'],
-        )
+        self.assertEqual(0, len(geo_mods))
 
         # Smoke test repr
         for route53_record in route53_records:

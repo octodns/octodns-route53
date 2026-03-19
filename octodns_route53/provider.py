@@ -149,6 +149,10 @@ class _Route53Record(EqualityTupleMixin):
                 )
 
         # Rules
+        # Check if any rule uses subnets to determine catchall type
+        has_subnets = any(
+            rule.data.get('subnets', []) for rule in record.dynamic.rules
+        )
         for i, rule in enumerate(record.dynamic.rules):
             pool_name = rule.data['pool']
             geos = rule.data.get('geos', [])
@@ -181,10 +185,25 @@ class _Route53Record(EqualityTupleMixin):
                             geo=geo,
                         )
                     )
+            elif has_subnets:
+                # Catchall for subnet-based routing uses CidrRoutingConfig
+                # with the special '*' LocationName as the default
+                ret.add(
+                    _Route53DynamicSubnetRule(
+                        provider,
+                        hosted_zone_id,
+                        record,
+                        pool_name,
+                        i,
+                        creating,
+                        collection_id,
+                        default=True,
+                    )
+                )
             else:
                 # There's no geo's for this rule so it's the catchall that will
-                # just point things that don't match any geo or subnet rules to
-                # the specified pool
+                # just point things that don't match any geo rules to the
+                # specified pool
                 ret.add(
                     _Route53DynamicRule(
                         provider, hosted_zone_id, record, pool_name, i, creating
@@ -503,6 +522,7 @@ class _Route53DynamicSubnetRule(_Route53Record):
         index,
         creating,
         collection_id,
+        default=False,
     ):
         super().__init__(provider, record, creating)
 
@@ -510,6 +530,7 @@ class _Route53DynamicSubnetRule(_Route53Record):
         self.pool_name = pool_name
         self.index = index
         self.collection_id = collection_id
+        self.default = default
 
         self.target_dns_name = f'_octodns-{pool_name}-pool.{record.fqdn}'
 
@@ -528,7 +549,7 @@ class _Route53DynamicSubnetRule(_Route53Record):
                 },
                 'CidrRoutingConfig': {
                     'CollectionId': self.collection_id,
-                    'LocationName': f'r{self.index}',
+                    'LocationName': '*' if self.default else f'r{self.index}',
                 },
                 'Name': self.fqdn,
                 'SetIdentifier': self.identifer,
@@ -1244,16 +1265,29 @@ class Route53Provider(_AuthMixin, BaseProvider):
 
         # Add/update desired locations
         for loc_name, cidrs in desired_locations.items():
-            existing_cidrs = sorted(existing.get(loc_name, []))
-            if sorted(cidrs) != existing_cidrs:
-                # PUT replaces the location's blocks
-                changes.append(
-                    {
-                        'LocationName': loc_name,
-                        'Action': 'PUT',
-                        'CidrList': sorted(cidrs),
-                    }
-                )
+            desired_set = set(cidrs)
+            existing_set = set(existing.get(loc_name, []))
+            if desired_set != existing_set:
+                # DELETE blocks that are no longer wanted
+                to_remove = sorted(existing_set - desired_set)
+                if to_remove:
+                    changes.append(
+                        {
+                            'LocationName': loc_name,
+                            'Action': 'DELETE_IF_EXISTS',
+                            'CidrList': to_remove,
+                        }
+                    )
+                # PUT blocks that need to be added
+                to_add = sorted(desired_set - existing_set)
+                if to_add:
+                    changes.append(
+                        {
+                            'LocationName': loc_name,
+                            'Action': 'PUT',
+                            'CidrList': to_add,
+                        }
+                    )
 
         # Remove locations that are no longer needed
         for loc_name in existing:
@@ -1308,10 +1342,14 @@ class Route53Provider(_AuthMixin, BaseProvider):
                 i = int(_id.split('-', 1)[0])
                 target_pool = _parse_pool_name(rrset['AliasTarget']['DNSName'])
                 rules[i]['pool'] = target_pool
-                collection_id = rrset['CidrRoutingConfig']['CollectionId']
                 location_name = rrset['CidrRoutingConfig']['LocationName']
-                cidr_blocks = self._load_cidr_blocks(collection_id)
-                rules[i]['subnets'] = sorted(cidr_blocks.get(location_name, []))
+                if location_name != '*':
+                    # Non-default rules have actual CIDR blocks
+                    collection_id = rrset['CidrRoutingConfig']['CollectionId']
+                    cidr_blocks = self._load_cidr_blocks(collection_id)
+                    rules[i]['subnets'] = sorted(
+                        cidr_blocks.get(location_name, [])
+                    )
             elif 'GeoLocation' in rrset:
                 # These are rules
                 _id = rrset['SetIdentifier']
@@ -1989,8 +2027,11 @@ class Route53Provider(_AuthMixin, BaseProvider):
                     continue
                 if _type != rrset['Type']:
                     continue
-                collection_id = rrset['CidrRoutingConfig']['CollectionId']
                 location_name = rrset['CidrRoutingConfig']['LocationName']
+                if location_name == '*':
+                    # Default/catchall rule, no CIDR blocks to check
+                    continue
+                collection_id = rrset['CidrRoutingConfig']['CollectionId']
                 cidr_blocks = self._load_cidr_blocks(collection_id)
                 existing_cidrs = sorted(cidr_blocks.get(location_name, []))
                 # Find the matching rule by index from SetIdentifier
