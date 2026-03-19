@@ -2176,6 +2176,21 @@ class Route53Provider(_AuthMixin, BaseProvider):
             collection_id = self._get_or_create_cidr_collection(desired.name)
             self._sync_cidr_locations(collection_id, desired_locations)
 
+        if collection_id is None:
+            # Check if any existing records being deleted/updated use
+            # subnets, we'll need the collection_id to match the rrsets
+            for c in changes:
+                existing = getattr(c, 'existing', None)
+                if existing and getattr(existing, 'dynamic', False):
+                    for rule in existing.dynamic.rules:
+                        if rule.data.get('subnets', []):
+                            collection_id = self._get_cidr_collection(
+                                desired.name
+                            )
+                            break
+                    if collection_id is not None:
+                        break
+
         batch = []
         batch_rs_count = 0
         zone_id = self._get_zone_id(desired.name, True)

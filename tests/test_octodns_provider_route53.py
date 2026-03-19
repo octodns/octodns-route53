@@ -5400,6 +5400,95 @@ class TestRoute53Provider(TestCase):
         provider._apply(plan)
         stubber.assert_no_pending_responses()
 
+    def test_apply_delete_subnet_records(self):
+        provider, stubber = self._get_stubbed_provider()
+
+        provider._health_checks = {}
+        provider.get_health_check_id = lambda r, v, s, c: None
+        provider._r53_zones = {'unit.tests.': '/hostedzone/z42'}
+
+        zone = Zone('unit.tests.', [])
+        subnet_record_data = {
+            'dynamic': {
+                'pools': {
+                    'internal': {
+                        'values': [
+                            {'weight': 1, 'value': '10.0.0.1', 'status': 'up'}
+                        ]
+                    },
+                    'external': {
+                        'values': [
+                            {'weight': 1, 'value': '2.2.2.2', 'status': 'up'}
+                        ]
+                    },
+                },
+                'rules': [
+                    {'pool': 'internal', 'subnets': ['10.0.0.0/8']},
+                    {'pool': 'external'},
+                ],
+            },
+            'ttl': 60,
+            'type': 'A',
+            'values': ['1.1.2.1'],
+        }
+        existing = Record.new(zone, '', subnet_record_data)
+
+        # Also include a dynamic geo record being deleted to exercise
+        # the branch where existing dynamic rules have no subnets
+        geo_record_data = {
+            'dynamic': {
+                'pools': {
+                    'one': {'values': [{'value': '3.3.3.3'}]},
+                    'two': {'values': [{'value': '4.4.4.4'}]},
+                },
+                'rules': [{'geos': ['EU'], 'pool': 'two'}, {'pool': 'one'}],
+            },
+            'ttl': 60,
+            'type': 'A',
+            'values': ['3.3.3.3'],
+        }
+        geo_existing = Record.new(zone, 'geo', geo_record_data)
+
+        plan = Mock()
+        # Desired zone has no subnet records
+        plan.desired = Zone('unit.tests.', [])
+        plan.changes = [Delete(geo_existing), Delete(existing)]
+
+        # Stub: list_cidr_collections (lookup existing collection)
+        stubber.add_response(
+            'list_cidr_collections',
+            {
+                'CidrCollections': [
+                    {
+                        'Id': 'col-1234',
+                        'Name': 'octodns-unit-tests',
+                        'Arn': 'arn:aws:route53:::cidrcollection/col-1234',
+                        'Version': 1,
+                    }
+                ]
+            },
+        )
+        # Stub: load_records (existing rrsets)
+        stubber.add_response(
+            'list_resource_record_sets',
+            {'ResourceRecordSets': [], 'IsTruncated': False, 'MaxItems': '100'},
+            {'HostedZoneId': '/hostedzone/z42'},
+        )
+        # Stub: change_resource_record_sets (apply)
+        stubber.add_response(
+            'change_resource_record_sets',
+            {
+                'ChangeInfo': {
+                    'Id': 'change-1',
+                    'Status': 'PENDING',
+                    'SubmittedAt': '2024-01-01T00:00:00Z',
+                }
+            },
+        )
+
+        provider._apply(plan)
+        stubber.assert_no_pending_responses()
+
     def test_mod_Update_set_math(self):
         provider = Route53Provider('test', 'abc', '123')
 
