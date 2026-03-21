@@ -18,6 +18,7 @@ from octodns_route53.provider import (
     _mod_keyer,
     _octal_replace,
     _Route53Alias,
+    _Route53DynamicSubnetRule,
     _Route53DynamicValue,
     _Route53Record,
 )
@@ -325,6 +326,101 @@ dynamic_record_data = {
     'type': 'A',
     'values': ['1.1.2.1', '1.1.2.2'],
 }
+
+
+dynamic_subnet_rrsets = [
+    {
+        'Name': '_octodns-default-pool.unit.tests.',
+        'ResourceRecords': [{'Value': '1.1.2.1'}, {'Value': '1.1.2.2'}],
+        'TTL': 60,
+        'Type': 'A',
+    },
+    {
+        'Name': '_octodns-internal-value.unit.tests.',
+        'ResourceRecords': [{'Value': '10.0.0.1'}],
+        'SetIdentifier': 'internal-000',
+        'TTL': 60,
+        'Type': 'A',
+        'Weight': 1,
+    },
+    {
+        'Name': '_octodns-external-value.unit.tests.',
+        'ResourceRecords': [{'Value': '2.2.2.2'}],
+        'SetIdentifier': 'external-000',
+        'TTL': 60,
+        'Type': 'A',
+        'Weight': 1,
+    },
+    {
+        'AliasTarget': {
+            'DNSName': '_octodns-default-pool.unit.tests.',
+            'EvaluateTargetHealth': True,
+            'HostedZoneId': 'Z2',
+        },
+        'Failover': 'SECONDARY',
+        'Name': '_octodns-internal-pool.unit.tests.',
+        'SetIdentifier': 'internal-Secondary-default',
+        'Type': 'A',
+    },
+    {
+        'AliasTarget': {
+            'DNSName': '_octodns-internal-value.unit.tests.',
+            'EvaluateTargetHealth': True,
+            'HostedZoneId': 'Z2',
+        },
+        'Failover': 'PRIMARY',
+        'Name': '_octodns-internal-pool.unit.tests.',
+        'SetIdentifier': 'internal-Primary',
+        'Type': 'A',
+    },
+    {
+        'AliasTarget': {
+            'DNSName': '_octodns-default-pool.unit.tests.',
+            'EvaluateTargetHealth': True,
+            'HostedZoneId': 'Z2',
+        },
+        'Failover': 'SECONDARY',
+        'Name': '_octodns-external-pool.unit.tests.',
+        'SetIdentifier': 'external-Secondary-default',
+        'Type': 'A',
+    },
+    {
+        'AliasTarget': {
+            'DNSName': '_octodns-external-value.unit.tests.',
+            'EvaluateTargetHealth': True,
+            'HostedZoneId': 'Z2',
+        },
+        'Failover': 'PRIMARY',
+        'Name': '_octodns-external-pool.unit.tests.',
+        'SetIdentifier': 'external-Primary',
+        'Type': 'A',
+    },
+    {
+        'AliasTarget': {
+            'DNSName': '_octodns-internal-pool.unit.tests.',
+            'EvaluateTargetHealth': True,
+            'HostedZoneId': 'Z2',
+        },
+        'CidrRoutingConfig': {
+            'CollectionId': 'col-1234',
+            'LocationName': '0d6919570ce514c0',
+        },
+        'Name': 'unit.tests.',
+        'SetIdentifier': '0-internal-subnet',
+        'Type': 'A',
+    },
+    {
+        'AliasTarget': {
+            'DNSName': '_octodns-external-pool.unit.tests.',
+            'EvaluateTargetHealth': True,
+            'HostedZoneId': 'Z2',
+        },
+        'CidrRoutingConfig': {'CollectionId': 'col-1234', 'LocationName': '*'},
+        'Name': 'unit.tests.',
+        'SetIdentifier': '1-external-subnet',
+        'Type': 'A',
+    },
+]
 
 
 class TestRoute53Provider(TestCase):
@@ -1035,6 +1131,7 @@ class TestRoute53Provider(TestCase):
         # Create minimal mock plan with no changes to avoid further processing
         plan = Mock()
         plan.desired.name = 'unit.tests.'
+        plan.desired.records = []
         plan.changes = []
 
         # Mock methods to avoid API calls
@@ -1071,6 +1168,7 @@ class TestRoute53Provider(TestCase):
         # Create minimal mock plan with no changes
         plan = Mock()
         plan.desired.name = 'unit.tests.'
+        plan.desired.records = []
         plan.changes = []
 
         # Mock methods to avoid API calls
@@ -1105,6 +1203,7 @@ class TestRoute53Provider(TestCase):
 
         plan = Mock()
         plan.desired.name = 'unit.tests.'
+        plan.desired.records = []
         plan.changes = []
 
         # Mock methods to avoid API calls
@@ -1506,6 +1605,37 @@ class TestRoute53Provider(TestCase):
             provider._process_desired_zone(desired)
         self.assertEqual(
             'test: healthcheck protocol "ICMP" not supported',
+            str(ctx.exception),
+        )
+
+        # mixed geo and subnet rules
+        desired = Zone('unit.tests.', [])
+        record = Record.new(
+            desired,
+            'a',
+            {
+                'ttl': 30,
+                'type': 'A',
+                'value': '1.2.3.4',
+                'dynamic': {
+                    'pools': {
+                        'one': {'values': [{'value': '1.2.3.4'}]},
+                        'two': {'values': [{'value': '2.2.3.4'}]},
+                    },
+                    'rules': [
+                        {'subnets': ['10.0.0.0/8'], 'pool': 'one'},
+                        {'geos': ['EU', 'NA-US-OR'], 'pool': 'two'},
+                        {'pool': 'one'},
+                    ],
+                },
+            },
+        )
+        desired.add_record(record)
+        with self.assertRaises(SupportsException) as ctx:
+            provider._process_desired_zone(desired)
+        self.assertEqual(
+            'test: mixed geo and subnet rules not supported '
+            'for a.unit.tests.',
             str(ctx.exception),
         )
 
@@ -4507,6 +4637,872 @@ class TestRoute53Provider(TestCase):
             [r.data for r in record.dynamic.rules],
         )
 
+    def test_data_for_dynamic_subnets(self):
+        provider = Route53Provider('test', 'abc', '123')
+        provider._health_checks = {}
+        provider._cidr_collections = {
+            'col-1234': {'0d6919570ce514c0': ['10.0.0.0/8', '172.16.0.0/12']}
+        }
+
+        data = provider._data_for_dynamic('', 'A', dynamic_subnet_rrsets)
+        self.assertEqual('A', data['type'])
+        self.assertEqual(60, data['ttl'])
+        self.assertEqual(['1.1.2.1', '1.1.2.2'], data['values'])
+
+        # Check pools
+        self.assertEqual(
+            {'weight': 1, 'value': '10.0.0.1', 'status': 'up'},
+            data['dynamic']['pools']['internal']['values'][0],
+        )
+        self.assertEqual(
+            {'weight': 1, 'value': '2.2.2.2', 'status': 'up'},
+            data['dynamic']['pools']['external']['values'][0],
+        )
+
+        # Check rules
+        rules = data['dynamic']['rules']
+        self.assertEqual(2, len(rules))
+        self.assertEqual(
+            {'pool': 'internal', 'subnets': ['10.0.0.0/8', '172.16.0.0/12']},
+            rules[0],
+        )
+        self.assertEqual({'pool': 'external'}, rules[1])
+
+    @patch('octodns_route53.Route53Provider._get_zone_id')
+    @patch('octodns_route53.Route53Provider._load_records')
+    def test_dynamic_subnet_populate(self, load_records_mock, get_zone_id_mock):
+        provider = Route53Provider('test', 'abc', '123')
+        provider._health_checks = {}
+        provider._cidr_collections = {
+            'col-1234': {'0d6919570ce514c0': ['10.0.0.0/8', '172.16.0.0/12']}
+        }
+
+        get_zone_id_mock.side_effect = ['z44']
+        load_records_mock.side_effect = [dynamic_subnet_rrsets]
+
+        got = Zone('unit.tests.', [])
+        provider.populate(got)
+
+        self.assertEqual(1, len(got.records))
+        record = list(got.records)[0]
+        self.assertEqual('', record.name)
+        self.assertEqual('A', record._type)
+        self.assertTrue(record.dynamic)
+
+        # Verify subnet rule
+        rules = [r.data for r in record.dynamic.rules]
+        self.assertEqual(
+            {'pool': 'internal', 'subnets': ['10.0.0.0/8', '172.16.0.0/12']},
+            rules[0],
+        )
+        # Verify default rule
+        self.assertEqual({'pool': 'external'}, rules[1])
+
+    def test_cidr_location_name(self):
+        self.assertEqual('octodns', Route53Provider._CIDR_COLLECTION_NAME)
+        # Deterministic
+        h = Route53Provider._cidr_location_name(['10.0.0.0/8'])
+        self.assertEqual(h, Route53Provider._cidr_location_name(['10.0.0.0/8']))
+        # 16-char hex
+        self.assertEqual(16, len(h))
+        # Order-independent
+        self.assertEqual(
+            Route53Provider._cidr_location_name(
+                ['172.16.0.0/12', '10.0.0.0/8']
+            ),
+            Route53Provider._cidr_location_name(
+                ['10.0.0.0/8', '172.16.0.0/12']
+            ),
+        )
+
+    def test_get_cidr_collection(self):
+        provider, stubber = self._get_stubbed_provider()
+
+        collection_summary = {
+            'Id': 'col-1234',
+            'Name': 'octodns',
+            'Arn': 'arn:aws:route53:::cidrcollection/col-1234',
+            'Version': 1,
+        }
+
+        # Collection exists
+        stubber.add_response(
+            'list_cidr_collections', {'CidrCollections': [collection_summary]}
+        )
+        result = provider._get_cidr_collection()
+        self.assertEqual('col-1234', result)
+
+        # Collection doesn't exist
+        stubber.add_response(
+            'list_cidr_collections',
+            {
+                'CidrCollections': [
+                    {
+                        'Id': 'col-other',
+                        'Name': 'other',
+                        'Arn': 'arn:aws:route53:::cidrcollection/col-other',
+                        'Version': 1,
+                    }
+                ]
+            },
+        )
+        result = provider._get_cidr_collection()
+        self.assertIsNone(result)
+
+        # Paginated response
+        stubber.add_response(
+            'list_cidr_collections',
+            {
+                'CidrCollections': [
+                    {
+                        'Id': 'col-other',
+                        'Name': 'other',
+                        'Arn': 'arn:aws:route53:::cidrcollection/col-other',
+                        'Version': 1,
+                    }
+                ],
+                'NextToken': 'token1',
+            },
+        )
+        stubber.add_response(
+            'list_cidr_collections',
+            {
+                'CidrCollections': [
+                    {
+                        'Id': 'col-found',
+                        'Name': 'octodns',
+                        'Arn': 'arn:aws:route53:::cidrcollection/col-found',
+                        'Version': 1,
+                    }
+                ]
+            },
+        )
+        result = provider._get_cidr_collection()
+        self.assertEqual('col-found', result)
+
+        stubber.assert_no_pending_responses()
+
+    def test_create_cidr_collection(self):
+        provider, stubber = self._get_stubbed_provider()
+
+        stubber.add_response(
+            'create_cidr_collection',
+            {
+                'Collection': {
+                    'Id': 'col-new',
+                    'Name': 'octodns',
+                    'Arn': 'arn:aws:route53:::cidrcollection/col-new',
+                    'Version': 1,
+                },
+                'Location': 'https://route53.amazonaws.com/cidrcollection/col-new',
+            },
+        )
+        result = provider._create_cidr_collection()
+        self.assertEqual('col-new', result)
+        stubber.assert_no_pending_responses()
+
+    def test_load_cidr_blocks(self):
+        provider, stubber = self._get_stubbed_provider()
+
+        stubber.add_response(
+            'list_cidr_blocks',
+            {
+                'CidrBlocks': [
+                    {'CidrBlock': '10.0.0.0/8', 'LocationName': 'r0'},
+                    {'CidrBlock': '172.16.0.0/12', 'LocationName': 'r0'},
+                    {'CidrBlock': '192.168.0.0/16', 'LocationName': 'r1'},
+                ]
+            },
+            {'CollectionId': 'col-1234'},
+        )
+
+        result = provider._load_cidr_blocks('col-1234')
+        self.assertEqual(
+            {'r0': ['10.0.0.0/8', '172.16.0.0/12'], 'r1': ['192.168.0.0/16']},
+            result,
+        )
+
+        # Second call should use cache
+        result2 = provider._load_cidr_blocks('col-1234')
+        self.assertEqual(result, result2)
+        stubber.assert_no_pending_responses()
+
+    def test_sync_cidr_locations(self):
+        provider, stubber = self._get_stubbed_provider()
+
+        loc = '0d6919570ce514c0'
+
+        # Pre-populate cache with existing state (stale location left alone)
+        provider._cidr_collections = {
+            'col-1234': {
+                loc: ['10.0.0.0/8'],
+                'da3508145559327a': ['192.168.0.0/16'],
+            }
+        }
+
+        stubber.add_response(
+            'change_cidr_collection',
+            {'Id': 'change-id-1234'},
+            {
+                'Id': 'col-1234',
+                'Changes': [
+                    {
+                        'LocationName': loc,
+                        'Action': 'PUT',
+                        'CidrList': ['172.16.0.0/12'],
+                    }
+                ],
+            },
+        )
+
+        desired = {loc: ['10.0.0.0/8', '172.16.0.0/12']}
+        provider._sync_cidr_locations('col-1234', desired)
+
+        # Cache should be invalidated
+        self.assertNotIn('col-1234', provider._cidr_collections)
+        stubber.assert_no_pending_responses()
+
+    def test_sync_cidr_locations_replace_blocks(self):
+        provider, stubber = self._get_stubbed_provider()
+
+        loc = '7bc59b45c0e21e40'
+
+        # Location has old blocks that need full replacement
+        provider._cidr_collections = {
+            'col-1234': {loc: ['40.71.0.0/16', '10.0.0.0/8']}
+        }
+
+        stubber.add_response(
+            'change_cidr_collection',
+            {'Id': 'change-id-1234'},
+            {
+                'Id': 'col-1234',
+                'Changes': [
+                    {
+                        'LocationName': loc,
+                        'Action': 'DELETE_IF_EXISTS',
+                        'CidrList': ['10.0.0.0/8', '40.71.0.0/16'],
+                    },
+                    {
+                        'LocationName': loc,
+                        'Action': 'PUT',
+                        'CidrList': ['97.120.173.0/24'],
+                    },
+                ],
+            },
+        )
+
+        desired = {loc: ['97.120.173.0/24']}
+        provider._sync_cidr_locations('col-1234', desired)
+
+        self.assertNotIn('col-1234', provider._cidr_collections)
+        stubber.assert_no_pending_responses()
+
+    def test_sync_cidr_locations_remove_blocks(self):
+        provider, stubber = self._get_stubbed_provider()
+
+        loc = '93997fe8a8121085'
+
+        # Location has extra blocks that need removing, no new ones to add
+        provider._cidr_collections = {
+            'col-1234': {loc: ['10.0.0.0/8', '172.16.0.0/12']}
+        }
+
+        stubber.add_response(
+            'change_cidr_collection',
+            {'Id': 'change-id-1234'},
+            {
+                'Id': 'col-1234',
+                'Changes': [
+                    {
+                        'LocationName': loc,
+                        'Action': 'DELETE_IF_EXISTS',
+                        'CidrList': ['172.16.0.0/12'],
+                    }
+                ],
+            },
+        )
+
+        desired = {loc: ['10.0.0.0/8']}
+        provider._sync_cidr_locations('col-1234', desired)
+
+        self.assertNotIn('col-1234', provider._cidr_collections)
+        stubber.assert_no_pending_responses()
+
+    def test_sync_cidr_locations_no_changes(self):
+        provider, stubber = self._get_stubbed_provider()
+
+        loc = '93997fe8a8121085'
+
+        # Pre-populate cache - already matches desired
+        provider._cidr_collections = {'col-1234': {loc: ['10.0.0.0/8']}}
+
+        desired = {loc: ['10.0.0.0/8']}
+        provider._sync_cidr_locations('col-1234', desired)
+
+        # No API call should be made, cache should remain
+        self.assertIn('col-1234', provider._cidr_collections)
+        stubber.assert_no_pending_responses()
+
+    def test_get_or_create_cidr_collection_existing(self):
+        provider, stubber = self._get_stubbed_provider()
+
+        # Collection already exists
+        stubber.add_response(
+            'list_cidr_collections',
+            {
+                'CidrCollections': [
+                    {
+                        'Id': 'col-existing',
+                        'Name': 'octodns',
+                        'Arn': 'arn:aws:route53:::cidrcollection/col-existing',
+                        'Version': 1,
+                    }
+                ]
+            },
+        )
+        result = provider._get_or_create_cidr_collection()
+        self.assertEqual('col-existing', result)
+        stubber.assert_no_pending_responses()
+
+    def test_get_or_create_cidr_collection_creates(self):
+        provider, stubber = self._get_stubbed_provider()
+
+        # Collection doesn't exist
+        stubber.add_response('list_cidr_collections', {'CidrCollections': []})
+        # So it creates one
+        stubber.add_response(
+            'create_cidr_collection',
+            {
+                'Collection': {
+                    'Id': 'col-new',
+                    'Name': 'octodns',
+                    'Arn': 'arn:aws:route53:::cidrcollection/col-new',
+                    'Version': 1,
+                },
+                'Location': 'https://route53.amazonaws.com/cidrcollection/col-new',
+            },
+        )
+        result = provider._get_or_create_cidr_collection()
+        self.assertEqual('col-new', result)
+        stubber.assert_no_pending_responses()
+
+    def test_load_cidr_blocks_paginated(self):
+        provider, stubber = self._get_stubbed_provider()
+
+        stubber.add_response(
+            'list_cidr_blocks',
+            {
+                'CidrBlocks': [
+                    {'CidrBlock': '10.0.0.0/8', 'LocationName': 'r0'}
+                ],
+                'NextToken': 'token1',
+            },
+            {'CollectionId': 'col-1234'},
+        )
+        stubber.add_response(
+            'list_cidr_blocks',
+            {
+                'CidrBlocks': [
+                    {'CidrBlock': '172.16.0.0/12', 'LocationName': 'r0'}
+                ]
+            },
+            {'CollectionId': 'col-1234', 'NextToken': 'token1'},
+        )
+
+        result = provider._load_cidr_blocks('col-1234')
+        self.assertEqual({'r0': ['10.0.0.0/8', '172.16.0.0/12']}, result)
+        stubber.assert_no_pending_responses()
+
+    def test_extra_changes_cidr_drift(self):
+        provider, stubber = self._get_stubbed_provider()
+
+        provider._health_checks = {}
+        provider._cidr_collections = {}
+
+        zone = Zone('unit.tests.', [])
+        subnet_record_data = {
+            'dynamic': {
+                'pools': {
+                    'internal': {
+                        'values': [
+                            {'weight': 1, 'value': '10.0.0.1', 'status': 'up'}
+                        ]
+                    },
+                    'external': {
+                        'values': [
+                            {'weight': 1, 'value': '2.2.2.2', 'status': 'up'}
+                        ]
+                    },
+                },
+                'rules': [
+                    {
+                        'pool': 'internal',
+                        'subnets': ['10.0.0.0/8', '172.16.0.0/12'],
+                    },
+                    {'pool': 'external'},
+                ],
+            },
+            'ttl': 60,
+            'type': 'A',
+            'values': ['1.1.2.1', '1.1.2.2'],
+        }
+        record = Record.new(zone, '', subnet_record_data)
+
+        # RRsets that include a CidrRoutingConfig pointing to this record
+        # plus a default catchall with LocationName '*'
+        rrsets = [
+            {
+                'AliasTarget': {
+                    'DNSName': '_octodns-internal-pool.unit.tests.',
+                    'EvaluateTargetHealth': True,
+                    'HostedZoneId': 'Z2',
+                },
+                'CidrRoutingConfig': {
+                    'CollectionId': 'col-1234',
+                    'LocationName': '93997fe8a8121085',
+                },
+                'Name': 'unit.tests.',
+                'SetIdentifier': '0-internal-subnet',
+                'Type': 'A',
+            },
+            {
+                'AliasTarget': {
+                    'DNSName': '_octodns-external-pool.unit.tests.',
+                    'EvaluateTargetHealth': True,
+                    'HostedZoneId': 'Z2',
+                },
+                'CidrRoutingConfig': {
+                    'CollectionId': 'col-1234',
+                    'LocationName': '*',
+                },
+                'Name': 'unit.tests.',
+                'SetIdentifier': '1-external-subnet',
+                'Type': 'A',
+            },
+        ]
+
+        provider._r53_rrsets = {'z44': rrsets}
+
+        # Desired subnets hash differently from existing LocationName (drift)
+        result = provider._extra_changes_dynamic_needs_update('z44', record)
+        self.assertTrue(result)
+
+    def test_extra_changes_cidr_no_drift(self):
+        provider, stubber = self._get_stubbed_provider()
+
+        provider._health_checks = {}
+        provider._cidr_collections = {}
+
+        zone = Zone('unit.tests.', [])
+        subnet_record_data = {
+            'dynamic': {
+                'pools': {
+                    'internal': {
+                        'values': [
+                            {'weight': 1, 'value': '10.0.0.1', 'status': 'up'}
+                        ]
+                    },
+                    'external': {
+                        'values': [
+                            {'weight': 1, 'value': '2.2.2.2', 'status': 'up'}
+                        ]
+                    },
+                },
+                'rules': [
+                    {
+                        'pool': 'internal',
+                        'subnets': ['10.0.0.0/8', '172.16.0.0/12'],
+                    },
+                    {'pool': 'external'},
+                ],
+            },
+            'ttl': 60,
+            'type': 'A',
+            'values': ['1.1.2.1', '1.1.2.2'],
+        }
+        record = Record.new(zone, '', subnet_record_data)
+
+        rrsets = [
+            {
+                'AliasTarget': {
+                    'DNSName': '_octodns-internal-pool.unit.tests.',
+                    'EvaluateTargetHealth': True,
+                    'HostedZoneId': 'Z2',
+                },
+                'CidrRoutingConfig': {
+                    'CollectionId': 'col-1234',
+                    'LocationName': '0d6919570ce514c0',
+                },
+                'Name': 'unit.tests.',
+                'SetIdentifier': '0-internal-subnet',
+                'Type': 'A',
+            }
+        ]
+
+        # Add default catchall with LocationName '*'
+        rrsets.append(
+            {
+                'AliasTarget': {
+                    'DNSName': '_octodns-external-pool.unit.tests.',
+                    'EvaluateTargetHealth': True,
+                    'HostedZoneId': 'Z2',
+                },
+                'CidrRoutingConfig': {
+                    'CollectionId': 'col-1234',
+                    'LocationName': '*',
+                },
+                'Name': 'unit.tests.',
+                'SetIdentifier': '1-external-subnet',
+                'Type': 'A',
+            }
+        )
+
+        provider._r53_rrsets = {'z44': rrsets}
+
+        # No drift - same subnets, default catchall is skipped
+        result = provider._extra_changes_dynamic_needs_update('z44', record)
+        self.assertFalse(result)
+
+    def test_extra_changes_cidr_wrong_record(self):
+        provider, stubber = self._get_stubbed_provider()
+
+        provider._health_checks = {}
+        provider._cidr_collections = {}
+
+        zone = Zone('unit.tests.', [])
+        record = Record.new(
+            zone,
+            'other',
+            {
+                'dynamic': {
+                    'pools': {
+                        'p': {
+                            'values': [
+                                {
+                                    'weight': 1,
+                                    'value': '1.1.1.1',
+                                    'status': 'up',
+                                }
+                            ]
+                        }
+                    },
+                    'rules': [{'pool': 'p'}],
+                },
+                'ttl': 60,
+                'type': 'A',
+                'values': ['1.1.1.1'],
+            },
+        )
+
+        # CIDR rrset for a different record (unit.tests. not other.unit.tests.)
+        rrsets = [
+            {
+                'AliasTarget': {
+                    'DNSName': '_octodns-internal-pool.unit.tests.',
+                    'EvaluateTargetHealth': True,
+                    'HostedZoneId': 'Z2',
+                },
+                'CidrRoutingConfig': {
+                    'CollectionId': 'col-1234',
+                    'LocationName': '93997fe8a8121085',
+                },
+                'Name': 'unit.tests.',
+                'SetIdentifier': '0-internal-subnet',
+                'Type': 'A',
+            }
+        ]
+
+        provider._r53_rrsets = {'z44': rrsets}
+
+        result = provider._extra_changes_dynamic_needs_update('z44', record)
+        self.assertFalse(result)
+
+    def test_extra_changes_cidr_rule_index_out_of_range(self):
+        provider, stubber = self._get_stubbed_provider()
+
+        provider._health_checks = {}
+        provider._cidr_collections = {}
+
+        zone = Zone('unit.tests.', [])
+        record = Record.new(
+            zone,
+            '',
+            {
+                'dynamic': {
+                    'pools': {
+                        'p': {
+                            'values': [
+                                {
+                                    'weight': 1,
+                                    'value': '1.1.1.1',
+                                    'status': 'up',
+                                }
+                            ]
+                        }
+                    },
+                    'rules': [{'pool': 'p'}],
+                },
+                'ttl': 60,
+                'type': 'A',
+                'values': ['1.1.1.1'],
+            },
+        )
+
+        # Rule index 5 is beyond the record's rules list
+        rrsets = [
+            {
+                'AliasTarget': {
+                    'DNSName': '_octodns-p-pool.unit.tests.',
+                    'EvaluateTargetHealth': True,
+                    'HostedZoneId': 'Z2',
+                },
+                'CidrRoutingConfig': {
+                    'CollectionId': 'col-1234',
+                    'LocationName': '93997fe8a8121085',
+                },
+                'Name': 'unit.tests.',
+                'SetIdentifier': '5-p-subnet',
+                'Type': 'A',
+            }
+        ]
+
+        provider._r53_rrsets = {'z44': rrsets}
+
+        result = provider._extra_changes_dynamic_needs_update('z44', record)
+        self.assertFalse(result)
+
+    def test_extra_changes_cidr_wrong_type(self):
+        provider, stubber = self._get_stubbed_provider()
+
+        provider._health_checks = {}
+        provider._cidr_collections = {}
+
+        zone = Zone('unit.tests.', [])
+        record = Record.new(
+            zone,
+            '',
+            {
+                'dynamic': {
+                    'pools': {
+                        'p': {
+                            'values': [
+                                {'weight': 1, 'value': '::1', 'status': 'up'}
+                            ]
+                        }
+                    },
+                    'rules': [{'pool': 'p'}],
+                },
+                'ttl': 60,
+                'type': 'AAAA',
+                'values': ['::1'],
+            },
+        )
+
+        # CIDR rrset with wrong type (A vs AAAA)
+        rrsets = [
+            {
+                'AliasTarget': {
+                    'DNSName': '_octodns-internal-pool.unit.tests.',
+                    'EvaluateTargetHealth': True,
+                    'HostedZoneId': 'Z2',
+                },
+                'CidrRoutingConfig': {
+                    'CollectionId': 'col-1234',
+                    'LocationName': '93997fe8a8121085',
+                },
+                'Name': 'unit.tests.',
+                'SetIdentifier': '0-internal-subnet',
+                'Type': 'A',
+            }
+        ]
+
+        provider._r53_rrsets = {'z44': rrsets}
+
+        result = provider._extra_changes_dynamic_needs_update('z44', record)
+        self.assertFalse(result)
+
+    def test_apply_with_subnet_records(self):
+        provider, stubber = self._get_stubbed_provider()
+
+        provider._health_checks = {}
+        provider.get_health_check_id = lambda r, v, s, c: None
+        provider._r53_zones = {'unit.tests.': '/hostedzone/z42'}
+
+        zone = Zone('unit.tests.', [])
+        subnet_record_data = {
+            'dynamic': {
+                'pools': {
+                    'internal': {
+                        'values': [
+                            {'weight': 1, 'value': '10.0.0.1', 'status': 'up'}
+                        ]
+                    },
+                    'external': {
+                        'values': [
+                            {'weight': 1, 'value': '2.2.2.2', 'status': 'up'}
+                        ]
+                    },
+                },
+                'rules': [
+                    {'pool': 'internal', 'subnets': ['10.0.0.0/8']},
+                    {'pool': 'external'},
+                ],
+            },
+            'ttl': 60,
+            'type': 'A',
+            'values': ['1.1.2.1'],
+        }
+        record = Record.new(zone, '', subnet_record_data)
+        zone.add_record(record)
+
+        plan = Mock()
+        plan.desired = zone
+        plan.changes = [Create(record)]
+
+        # Stub: list_cidr_collections (find existing)
+        stubber.add_response(
+            'list_cidr_collections',
+            {
+                'CidrCollections': [
+                    {
+                        'Id': 'col-1234',
+                        'Name': 'octodns',
+                        'Arn': 'arn:aws:route53:::cidrcollection/col-1234',
+                        'Version': 1,
+                    }
+                ]
+            },
+        )
+        # Stub: list_cidr_blocks (to compute diff)
+        stubber.add_response(
+            'list_cidr_blocks', {'CidrBlocks': []}, {'CollectionId': 'col-1234'}
+        )
+        # Stub: change_cidr_collection (to sync)
+        stubber.add_response(
+            'change_cidr_collection',
+            {'Id': 'change-1'},
+            {
+                'Id': 'col-1234',
+                'Changes': [
+                    {
+                        'LocationName': '93997fe8a8121085',
+                        'Action': 'PUT',
+                        'CidrList': ['10.0.0.0/8'],
+                    }
+                ],
+            },
+        )
+        # Stub: load_records (existing rrsets)
+        stubber.add_response(
+            'list_resource_record_sets',
+            {'ResourceRecordSets': [], 'IsTruncated': False, 'MaxItems': '100'},
+            {'HostedZoneId': '/hostedzone/z42'},
+        )
+        # Stub: change_resource_record_sets (apply)
+        stubber.add_response(
+            'change_resource_record_sets',
+            {
+                'ChangeInfo': {
+                    'Id': 'change-1',
+                    'Status': 'PENDING',
+                    'SubmittedAt': '2024-01-01T00:00:00Z',
+                }
+            },
+        )
+
+        provider._apply(plan)
+        stubber.assert_no_pending_responses()
+
+    def test_apply_delete_subnet_records(self):
+        provider, stubber = self._get_stubbed_provider()
+
+        provider._health_checks = {}
+        provider.get_health_check_id = lambda r, v, s, c: None
+        provider._r53_zones = {'unit.tests.': '/hostedzone/z42'}
+
+        zone = Zone('unit.tests.', [])
+        subnet_record_data = {
+            'dynamic': {
+                'pools': {
+                    'internal': {
+                        'values': [
+                            {'weight': 1, 'value': '10.0.0.1', 'status': 'up'}
+                        ]
+                    },
+                    'external': {
+                        'values': [
+                            {'weight': 1, 'value': '2.2.2.2', 'status': 'up'}
+                        ]
+                    },
+                },
+                'rules': [
+                    {'pool': 'internal', 'subnets': ['10.0.0.0/8']},
+                    {'pool': 'external'},
+                ],
+            },
+            'ttl': 60,
+            'type': 'A',
+            'values': ['1.1.2.1'],
+        }
+        existing = Record.new(zone, '', subnet_record_data)
+
+        # Also include a dynamic geo record being deleted to exercise
+        # the branch where existing dynamic rules have no subnets
+        geo_record_data = {
+            'dynamic': {
+                'pools': {
+                    'one': {'values': [{'value': '3.3.3.3'}]},
+                    'two': {'values': [{'value': '4.4.4.4'}]},
+                },
+                'rules': [{'geos': ['EU'], 'pool': 'two'}, {'pool': 'one'}],
+            },
+            'ttl': 60,
+            'type': 'A',
+            'values': ['3.3.3.3'],
+        }
+        geo_existing = Record.new(zone, 'geo', geo_record_data)
+
+        plan = Mock()
+        # Desired zone has no subnet records
+        plan.desired = Zone('unit.tests.', [])
+        plan.changes = [Delete(geo_existing), Delete(existing)]
+
+        # Stub: list_cidr_collections (lookup existing collection)
+        stubber.add_response(
+            'list_cidr_collections',
+            {
+                'CidrCollections': [
+                    {
+                        'Id': 'col-1234',
+                        'Name': 'octodns',
+                        'Arn': 'arn:aws:route53:::cidrcollection/col-1234',
+                        'Version': 1,
+                    }
+                ]
+            },
+        )
+        # Stub: load_records (existing rrsets)
+        stubber.add_response(
+            'list_resource_record_sets',
+            {'ResourceRecordSets': [], 'IsTruncated': False, 'MaxItems': '100'},
+            {'HostedZoneId': '/hostedzone/z42'},
+        )
+        # Stub: change_resource_record_sets (apply)
+        stubber.add_response(
+            'change_resource_record_sets',
+            {
+                'ChangeInfo': {
+                    'Id': 'change-1',
+                    'Status': 'PENDING',
+                    'SubmittedAt': '2024-01-01T00:00:00Z',
+                }
+            },
+        )
+
+        provider._apply(plan)
+        stubber.assert_no_pending_responses()
+
     def test_mod_Update_set_math(self):
         provider = Route53Provider('test', 'abc', '123')
 
@@ -4995,6 +5991,164 @@ class TestRoute53Records(TestCase):
             # Smoke test stringification
             route53_record.__repr__()
 
+    def test_dynamic_subnet_rule(self):
+        provider = DummyProvider()
+        zone = Zone('unit.tests.', [])
+        record = Record.new(
+            zone, '', {'ttl': 60, 'type': 'A', 'values': ['1.1.1.1']}
+        )
+
+        rule = _Route53DynamicSubnetRule(
+            provider,
+            'Z2',
+            record,
+            'internal',
+            0,
+            True,
+            'col-1234',
+            location_name='93997fe8a8121085',
+        )
+
+        self.assertEqual('0-internal-subnet', rule.identifer)
+        self.assertEqual(
+            '_octodns-internal-pool.unit.tests.', rule.target_dns_name
+        )
+
+        mod = rule.mod('CREATE', [])
+        self.assertEqual('CREATE', mod['Action'])
+        rrset = mod['ResourceRecordSet']
+        self.assertEqual('unit.tests.', rrset['Name'])
+        self.assertEqual('A', rrset['Type'])
+        self.assertEqual('0-internal-subnet', rrset['SetIdentifier'])
+        self.assertEqual(
+            {
+                'DNSName': '_octodns-internal-pool.unit.tests.',
+                'EvaluateTargetHealth': True,
+                'HostedZoneId': 'Z2',
+            },
+            rrset['AliasTarget'],
+        )
+        self.assertEqual(
+            {'CollectionId': 'col-1234', 'LocationName': '93997fe8a8121085'},
+            rrset['CidrRoutingConfig'],
+        )
+
+        # Test __hash__ - same identifer means same hash
+        rule2 = _Route53DynamicSubnetRule(
+            provider,
+            'Z2',
+            record,
+            'internal',
+            0,
+            True,
+            'col-1234',
+            location_name='93997fe8a8121085',
+        )
+        self.assertEqual(hash(rule), hash(rule2))
+
+        # Test __repr__
+        repr_str = repr(rule)
+        self.assertIn('_Route53DynamicSubnetRule', repr_str)
+        self.assertIn('unit.tests.', repr_str)
+
+    def test_new_dynamic_subnets(self):
+        provider = Route53Provider('test', 'abc', '123')
+        stubber = Stubber(provider._conn)
+        stubber.activate()
+
+        provider._health_checks = {}
+        provider.get_health_check_id = lambda r, v, s, c: 'hc42'
+
+        zone = Zone('unit.tests.', [])
+        subnet_record_data = {
+            'dynamic': {
+                'pools': {
+                    'internal': {
+                        'values': [
+                            {'weight': 1, 'value': '10.0.0.1', 'status': 'up'}
+                        ]
+                    },
+                    'external': {
+                        'values': [
+                            {'weight': 1, 'value': '2.2.2.2', 'status': 'up'}
+                        ]
+                    },
+                },
+                'rules': [
+                    {
+                        'pool': 'internal',
+                        'subnets': ['10.0.0.0/8', '172.16.0.0/12'],
+                    },
+                    {'pool': 'external'},
+                ],
+            },
+            'ttl': 60,
+            'type': 'A',
+            'values': ['1.1.2.1', '1.1.2.2'],
+        }
+        record = Record.new(zone, '', subnet_record_data)
+
+        route53_records = _Route53Record.new(
+            provider, record, 'z45', creating=True, collection_id='col-1234'
+        )
+
+        expected_mods = [r.mod('CREATE', []) for r in route53_records]
+        expected_mods.sort(key=_mod_keyer)
+
+        # Should have:
+        # 1 default pool + 2 pool values + 2 pool primaries + 2 pool
+        # secondaries + 1 subnet rule + 1 subnet catchall = 9
+        self.assertEqual(9, len(route53_records))
+
+        # Verify there are 2 CidrRoutingConfig mods (subnet rule + catchall)
+        cidr_mods = [
+            m
+            for m in expected_mods
+            if 'CidrRoutingConfig' in m['ResourceRecordSet']
+        ]
+        self.assertEqual(2, len(cidr_mods))
+
+        # Find the subnet rule and the catchall by LocationName
+        subnet_rule = [
+            m
+            for m in cidr_mods
+            if m['ResourceRecordSet']['CidrRoutingConfig']['LocationName']
+            != '*'
+        ]
+        catchall = [
+            m
+            for m in cidr_mods
+            if m['ResourceRecordSet']['CidrRoutingConfig']['LocationName']
+            == '*'
+        ]
+        self.assertEqual(1, len(subnet_rule))
+        self.assertEqual(1, len(catchall))
+
+        cidr_rrset = subnet_rule[0]['ResourceRecordSet']
+        self.assertEqual(
+            {'CollectionId': 'col-1234', 'LocationName': '0d6919570ce514c0'},
+            cidr_rrset['CidrRoutingConfig'],
+        )
+        self.assertEqual('0-internal-subnet', cidr_rrset['SetIdentifier'])
+
+        # Verify the catchall uses CidrRoutingConfig with LocationName '*'
+        catchall_rrset = catchall[0]['ResourceRecordSet']
+        self.assertEqual(
+            {'CollectionId': 'col-1234', 'LocationName': '*'},
+            catchall_rrset['CidrRoutingConfig'],
+        )
+        self.assertEqual('1-external-subnet', catchall_rrset['SetIdentifier'])
+
+        # Verify no GeoLocation mods exist (all routing is CIDR-based)
+        geo_mods = [
+            m for m in expected_mods if 'GeoLocation' in m['ResourceRecordSet']
+        ]
+        self.assertEqual(0, len(geo_mods))
+
+        # Smoke test repr
+        for route53_record in route53_records:
+            route53_record.__repr__()
+
 
 class TestModKeyer(TestCase):
     def test_mod_keyer(self):
@@ -5106,6 +6260,39 @@ class TestModKeyer(TestCase):
                     'ResourceRecordSet': {
                         'GeoLocation': 'some-target',
                         'SetIdentifier': 'some-id',
+                    },
+                }
+            ),
+        )
+
+        # CidrRoutingConfig has same priority as GeoLocation
+        self.assertEqual(
+            (0, -3, 'cidr-id'),
+            _mod_keyer(
+                {
+                    'Action': 'DELETE',
+                    'ResourceRecordSet': {
+                        'CidrRoutingConfig': {
+                            'CollectionId': 'col-1',
+                            'LocationName': 'r0',
+                        },
+                        'SetIdentifier': 'cidr-id',
+                    },
+                }
+            ),
+        )
+
+        self.assertEqual(
+            (1, 3, 'cidr-id'),
+            _mod_keyer(
+                {
+                    'Action': 'UPSERT',
+                    'ResourceRecordSet': {
+                        'CidrRoutingConfig': {
+                            'CollectionId': 'col-1',
+                            'LocationName': 'r0',
+                        },
+                        'SetIdentifier': 'cidr-id',
                     },
                 }
             ),
