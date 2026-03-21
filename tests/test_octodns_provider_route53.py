@@ -401,7 +401,10 @@ dynamic_subnet_rrsets = [
             'EvaluateTargetHealth': True,
             'HostedZoneId': 'Z2',
         },
-        'CidrRoutingConfig': {'CollectionId': 'col-1234', 'LocationName': 'r0'},
+        'CidrRoutingConfig': {
+            'CollectionId': 'col-1234',
+            'LocationName': '0d6919570ce514c0',
+        },
         'Name': 'unit.tests.',
         'SetIdentifier': '0-internal-subnet',
         'Type': 'A',
@@ -4638,7 +4641,7 @@ class TestRoute53Provider(TestCase):
         provider = Route53Provider('test', 'abc', '123')
         provider._health_checks = {}
         provider._cidr_collections = {
-            'col-1234': {'r0': ['10.0.0.0/8', '172.16.0.0/12']}
+            'col-1234': {'0d6919570ce514c0': ['10.0.0.0/8', '172.16.0.0/12']}
         }
 
         data = provider._data_for_dynamic('', 'A', dynamic_subnet_rrsets)
@@ -4671,7 +4674,7 @@ class TestRoute53Provider(TestCase):
         provider = Route53Provider('test', 'abc', '123')
         provider._health_checks = {}
         provider._cidr_collections = {
-            'col-1234': {'r0': ['10.0.0.0/8', '172.16.0.0/12']}
+            'col-1234': {'0d6919570ce514c0': ['10.0.0.0/8', '172.16.0.0/12']}
         }
 
         get_zone_id_mock.side_effect = ['z44']
@@ -4695,14 +4698,21 @@ class TestRoute53Provider(TestCase):
         # Verify default rule
         self.assertEqual({'pool': 'external'}, rules[1])
 
-    def test_cidr_collection_name(self):
+    def test_cidr_location_name(self):
+        self.assertEqual('octodns', Route53Provider._CIDR_COLLECTION_NAME)
+        # Deterministic
+        h = Route53Provider._cidr_location_name(['10.0.0.0/8'])
+        self.assertEqual(h, Route53Provider._cidr_location_name(['10.0.0.0/8']))
+        # 16-char hex
+        self.assertEqual(16, len(h))
+        # Order-independent
         self.assertEqual(
-            'octodns-unit-tests',
-            Route53Provider._cidr_collection_name('unit.tests.'),
-        )
-        self.assertEqual(
-            'octodns-sub-unit-tests',
-            Route53Provider._cidr_collection_name('sub.unit.tests.'),
+            Route53Provider._cidr_location_name(
+                ['172.16.0.0/12', '10.0.0.0/8']
+            ),
+            Route53Provider._cidr_location_name(
+                ['10.0.0.0/8', '172.16.0.0/12']
+            ),
         )
 
     def test_get_cidr_collection(self):
@@ -4710,7 +4720,7 @@ class TestRoute53Provider(TestCase):
 
         collection_summary = {
             'Id': 'col-1234',
-            'Name': 'octodns-unit-tests',
+            'Name': 'octodns',
             'Arn': 'arn:aws:route53:::cidrcollection/col-1234',
             'Version': 1,
         }
@@ -4719,7 +4729,7 @@ class TestRoute53Provider(TestCase):
         stubber.add_response(
             'list_cidr_collections', {'CidrCollections': [collection_summary]}
         )
-        result = provider._get_cidr_collection('unit.tests.')
+        result = provider._get_cidr_collection()
         self.assertEqual('col-1234', result)
 
         # Collection doesn't exist
@@ -4736,7 +4746,7 @@ class TestRoute53Provider(TestCase):
                 ]
             },
         )
-        result = provider._get_cidr_collection('unit.tests.')
+        result = provider._get_cidr_collection()
         self.assertIsNone(result)
 
         # Paginated response
@@ -4760,14 +4770,14 @@ class TestRoute53Provider(TestCase):
                 'CidrCollections': [
                     {
                         'Id': 'col-found',
-                        'Name': 'octodns-unit-tests',
+                        'Name': 'octodns',
                         'Arn': 'arn:aws:route53:::cidrcollection/col-found',
                         'Version': 1,
                     }
                 ]
             },
         )
-        result = provider._get_cidr_collection('unit.tests.')
+        result = provider._get_cidr_collection()
         self.assertEqual('col-found', result)
 
         stubber.assert_no_pending_responses()
@@ -4780,14 +4790,14 @@ class TestRoute53Provider(TestCase):
             {
                 'Collection': {
                     'Id': 'col-new',
-                    'Name': 'octodns-unit-tests',
+                    'Name': 'octodns',
                     'Arn': 'arn:aws:route53:::cidrcollection/col-new',
                     'Version': 1,
                 },
                 'Location': 'https://route53.amazonaws.com/cidrcollection/col-new',
             },
         )
-        result = provider._create_cidr_collection('unit.tests.')
+        result = provider._create_cidr_collection()
         self.assertEqual('col-new', result)
         stubber.assert_no_pending_responses()
 
@@ -4820,9 +4830,14 @@ class TestRoute53Provider(TestCase):
     def test_sync_cidr_locations(self):
         provider, stubber = self._get_stubbed_provider()
 
-        # Pre-populate cache with existing state
+        loc = '0d6919570ce514c0'
+
+        # Pre-populate cache with existing state (stale location left alone)
         provider._cidr_collections = {
-            'col-1234': {'r0': ['10.0.0.0/8'], 'r1': ['192.168.0.0/16']}
+            'col-1234': {
+                loc: ['10.0.0.0/8'],
+                'da3508145559327a': ['192.168.0.0/16'],
+            }
         }
 
         stubber.add_response(
@@ -4832,20 +4847,15 @@ class TestRoute53Provider(TestCase):
                 'Id': 'col-1234',
                 'Changes': [
                     {
-                        'LocationName': 'r0',
+                        'LocationName': loc,
                         'Action': 'PUT',
                         'CidrList': ['172.16.0.0/12'],
-                    },
-                    {
-                        'LocationName': 'r1',
-                        'Action': 'DELETE_IF_EXISTS',
-                        'CidrList': ['192.168.0.0/16'],
-                    },
+                    }
                 ],
             },
         )
 
-        desired = {'r0': ['10.0.0.0/8', '172.16.0.0/12']}
+        desired = {loc: ['10.0.0.0/8', '172.16.0.0/12']}
         provider._sync_cidr_locations('col-1234', desired)
 
         # Cache should be invalidated
@@ -4855,9 +4865,11 @@ class TestRoute53Provider(TestCase):
     def test_sync_cidr_locations_replace_blocks(self):
         provider, stubber = self._get_stubbed_provider()
 
-        # r0 has old blocks that need full replacement
+        loc = '7bc59b45c0e21e40'
+
+        # Location has old blocks that need full replacement
         provider._cidr_collections = {
-            'col-1234': {'r0': ['40.71.0.0/16', '10.0.0.0/8']}
+            'col-1234': {loc: ['40.71.0.0/16', '10.0.0.0/8']}
         }
 
         stubber.add_response(
@@ -4867,12 +4879,12 @@ class TestRoute53Provider(TestCase):
                 'Id': 'col-1234',
                 'Changes': [
                     {
-                        'LocationName': 'r0',
+                        'LocationName': loc,
                         'Action': 'DELETE_IF_EXISTS',
                         'CidrList': ['10.0.0.0/8', '40.71.0.0/16'],
                     },
                     {
-                        'LocationName': 'r0',
+                        'LocationName': loc,
                         'Action': 'PUT',
                         'CidrList': ['97.120.173.0/24'],
                     },
@@ -4880,7 +4892,7 @@ class TestRoute53Provider(TestCase):
             },
         )
 
-        desired = {'r0': ['97.120.173.0/24']}
+        desired = {loc: ['97.120.173.0/24']}
         provider._sync_cidr_locations('col-1234', desired)
 
         self.assertNotIn('col-1234', provider._cidr_collections)
@@ -4889,9 +4901,11 @@ class TestRoute53Provider(TestCase):
     def test_sync_cidr_locations_remove_blocks(self):
         provider, stubber = self._get_stubbed_provider()
 
-        # r0 has extra blocks that need removing, no new ones to add
+        loc = '93997fe8a8121085'
+
+        # Location has extra blocks that need removing, no new ones to add
         provider._cidr_collections = {
-            'col-1234': {'r0': ['10.0.0.0/8', '172.16.0.0/12']}
+            'col-1234': {loc: ['10.0.0.0/8', '172.16.0.0/12']}
         }
 
         stubber.add_response(
@@ -4901,7 +4915,7 @@ class TestRoute53Provider(TestCase):
                 'Id': 'col-1234',
                 'Changes': [
                     {
-                        'LocationName': 'r0',
+                        'LocationName': loc,
                         'Action': 'DELETE_IF_EXISTS',
                         'CidrList': ['172.16.0.0/12'],
                     }
@@ -4909,7 +4923,7 @@ class TestRoute53Provider(TestCase):
             },
         )
 
-        desired = {'r0': ['10.0.0.0/8']}
+        desired = {loc: ['10.0.0.0/8']}
         provider._sync_cidr_locations('col-1234', desired)
 
         self.assertNotIn('col-1234', provider._cidr_collections)
@@ -4918,10 +4932,12 @@ class TestRoute53Provider(TestCase):
     def test_sync_cidr_locations_no_changes(self):
         provider, stubber = self._get_stubbed_provider()
 
-        # Pre-populate cache - already matches desired
-        provider._cidr_collections = {'col-1234': {'r0': ['10.0.0.0/8']}}
+        loc = '93997fe8a8121085'
 
-        desired = {'r0': ['10.0.0.0/8']}
+        # Pre-populate cache - already matches desired
+        provider._cidr_collections = {'col-1234': {loc: ['10.0.0.0/8']}}
+
+        desired = {loc: ['10.0.0.0/8']}
         provider._sync_cidr_locations('col-1234', desired)
 
         # No API call should be made, cache should remain
@@ -4938,14 +4954,14 @@ class TestRoute53Provider(TestCase):
                 'CidrCollections': [
                     {
                         'Id': 'col-existing',
-                        'Name': 'octodns-unit-tests',
+                        'Name': 'octodns',
                         'Arn': 'arn:aws:route53:::cidrcollection/col-existing',
                         'Version': 1,
                     }
                 ]
             },
         )
-        result = provider._get_or_create_cidr_collection('unit.tests.')
+        result = provider._get_or_create_cidr_collection()
         self.assertEqual('col-existing', result)
         stubber.assert_no_pending_responses()
 
@@ -4960,14 +4976,14 @@ class TestRoute53Provider(TestCase):
             {
                 'Collection': {
                     'Id': 'col-new',
-                    'Name': 'octodns-unit-tests',
+                    'Name': 'octodns',
                     'Arn': 'arn:aws:route53:::cidrcollection/col-new',
                     'Version': 1,
                 },
                 'Location': 'https://route53.amazonaws.com/cidrcollection/col-new',
             },
         )
-        result = provider._get_or_create_cidr_collection('unit.tests.')
+        result = provider._get_or_create_cidr_collection()
         self.assertEqual('col-new', result)
         stubber.assert_no_pending_responses()
 
@@ -5002,7 +5018,7 @@ class TestRoute53Provider(TestCase):
         provider, stubber = self._get_stubbed_provider()
 
         provider._health_checks = {}
-        provider._cidr_collections = {'col-1234': {'r0': ['10.0.0.0/8']}}
+        provider._cidr_collections = {}
 
         zone = Zone('unit.tests.', [])
         subnet_record_data = {
@@ -5044,7 +5060,7 @@ class TestRoute53Provider(TestCase):
                 },
                 'CidrRoutingConfig': {
                     'CollectionId': 'col-1234',
-                    'LocationName': 'r0',
+                    'LocationName': '93997fe8a8121085',
                 },
                 'Name': 'unit.tests.',
                 'SetIdentifier': '0-internal-subnet',
@@ -5068,7 +5084,7 @@ class TestRoute53Provider(TestCase):
 
         provider._r53_rrsets = {'z44': rrsets}
 
-        # Desired subnets are different from existing (drift)
+        # Desired subnets hash differently from existing LocationName (drift)
         result = provider._extra_changes_dynamic_needs_update('z44', record)
         self.assertTrue(result)
 
@@ -5076,9 +5092,7 @@ class TestRoute53Provider(TestCase):
         provider, stubber = self._get_stubbed_provider()
 
         provider._health_checks = {}
-        provider._cidr_collections = {
-            'col-1234': {'r0': ['10.0.0.0/8', '172.16.0.0/12']}
-        }
+        provider._cidr_collections = {}
 
         zone = Zone('unit.tests.', [])
         subnet_record_data = {
@@ -5118,7 +5132,7 @@ class TestRoute53Provider(TestCase):
                 },
                 'CidrRoutingConfig': {
                     'CollectionId': 'col-1234',
-                    'LocationName': 'r0',
+                    'LocationName': '0d6919570ce514c0',
                 },
                 'Name': 'unit.tests.',
                 'SetIdentifier': '0-internal-subnet',
@@ -5191,7 +5205,7 @@ class TestRoute53Provider(TestCase):
                 },
                 'CidrRoutingConfig': {
                     'CollectionId': 'col-1234',
-                    'LocationName': 'r0',
+                    'LocationName': '93997fe8a8121085',
                 },
                 'Name': 'unit.tests.',
                 'SetIdentifier': '0-internal-subnet',
@@ -5208,7 +5222,7 @@ class TestRoute53Provider(TestCase):
         provider, stubber = self._get_stubbed_provider()
 
         provider._health_checks = {}
-        provider._cidr_collections = {'col-1234': {'r5': ['10.0.0.0/8']}}
+        provider._cidr_collections = {}
 
         zone = Zone('unit.tests.', [])
         record = Record.new(
@@ -5245,7 +5259,7 @@ class TestRoute53Provider(TestCase):
                 },
                 'CidrRoutingConfig': {
                     'CollectionId': 'col-1234',
-                    'LocationName': 'r5',
+                    'LocationName': '93997fe8a8121085',
                 },
                 'Name': 'unit.tests.',
                 'SetIdentifier': '5-p-subnet',
@@ -5295,7 +5309,7 @@ class TestRoute53Provider(TestCase):
                 },
                 'CidrRoutingConfig': {
                     'CollectionId': 'col-1234',
-                    'LocationName': 'r0',
+                    'LocationName': '93997fe8a8121085',
                 },
                 'Name': 'unit.tests.',
                 'SetIdentifier': '0-internal-subnet',
@@ -5353,7 +5367,7 @@ class TestRoute53Provider(TestCase):
                 'CidrCollections': [
                     {
                         'Id': 'col-1234',
-                        'Name': 'octodns-unit-tests',
+                        'Name': 'octodns',
                         'Arn': 'arn:aws:route53:::cidrcollection/col-1234',
                         'Version': 1,
                     }
@@ -5372,7 +5386,7 @@ class TestRoute53Provider(TestCase):
                 'Id': 'col-1234',
                 'Changes': [
                     {
-                        'LocationName': 'r0',
+                        'LocationName': '93997fe8a8121085',
                         'Action': 'PUT',
                         'CidrList': ['10.0.0.0/8'],
                     }
@@ -5461,22 +5475,13 @@ class TestRoute53Provider(TestCase):
                 'CidrCollections': [
                     {
                         'Id': 'col-1234',
-                        'Name': 'octodns-unit-tests',
+                        'Name': 'octodns',
                         'Arn': 'arn:aws:route53:::cidrcollection/col-1234',
                         'Version': 1,
                     }
                 ]
             },
         )
-        # Stub: list_cidr_blocks (existing locations in collection)
-        stubber.add_response(
-            'list_cidr_blocks',
-            {'CidrBlocks': [{'CidrBlock': '10.0.0.0/8', 'LocationName': 'r0'}]},
-        )
-        # Stub: change_cidr_collection (delete stale location)
-        stubber.add_response('change_cidr_collection', {'Id': 'change-cidr-1'})
-        # Stub: delete_cidr_collection (remove empty collection)
-        stubber.add_response('delete_cidr_collection', {})
         # Stub: load_records (existing rrsets)
         stubber.add_response(
             'list_resource_record_sets',
@@ -5994,7 +5999,14 @@ class TestRoute53Records(TestCase):
         )
 
         rule = _Route53DynamicSubnetRule(
-            provider, 'Z2', record, 'internal', 0, True, 'col-1234'
+            provider,
+            'Z2',
+            record,
+            'internal',
+            0,
+            True,
+            'col-1234',
+            location_name='93997fe8a8121085',
         )
 
         self.assertEqual('0-internal-subnet', rule.identifer)
@@ -6017,13 +6029,20 @@ class TestRoute53Records(TestCase):
             rrset['AliasTarget'],
         )
         self.assertEqual(
-            {'CollectionId': 'col-1234', 'LocationName': 'r0'},
+            {'CollectionId': 'col-1234', 'LocationName': '93997fe8a8121085'},
             rrset['CidrRoutingConfig'],
         )
 
         # Test __hash__ - same identifer means same hash
         rule2 = _Route53DynamicSubnetRule(
-            provider, 'Z2', record, 'internal', 0, True, 'col-1234'
+            provider,
+            'Z2',
+            record,
+            'internal',
+            0,
+            True,
+            'col-1234',
+            location_name='93997fe8a8121085',
         )
         self.assertEqual(hash(rule), hash(rule2))
 
@@ -6107,7 +6126,7 @@ class TestRoute53Records(TestCase):
 
         cidr_rrset = subnet_rule[0]['ResourceRecordSet']
         self.assertEqual(
-            {'CollectionId': 'col-1234', 'LocationName': 'r0'},
+            {'CollectionId': 'col-1234', 'LocationName': '0d6919570ce514c0'},
             cidr_rrset['CidrRoutingConfig'],
         )
         self.assertEqual('0-internal-subnet', cidr_rrset['SetIdentifier'])

@@ -6,6 +6,7 @@ import hashlib
 import logging
 import re
 from collections import defaultdict
+from hashlib import sha256
 from ipaddress import AddressValueError, ip_address
 from uuid import uuid4
 
@@ -159,6 +160,7 @@ class _Route53Record(EqualityTupleMixin):
             subnets = rule.data.get('subnets', [])
             if subnets:
                 # Create a CidrRoutingConfig RRSet for subnet-based routing
+                location_name = Route53Provider._cidr_location_name(subnets)
                 ret.add(
                     _Route53DynamicSubnetRule(
                         provider,
@@ -168,6 +170,7 @@ class _Route53Record(EqualityTupleMixin):
                         i,
                         creating,
                         collection_id,
+                        location_name=location_name,
                     )
                 )
             elif geos:
@@ -523,6 +526,7 @@ class _Route53DynamicSubnetRule(_Route53Record):
         creating,
         collection_id,
         default=False,
+        location_name=None,
     ):
         super().__init__(provider, record, creating)
 
@@ -531,6 +535,7 @@ class _Route53DynamicSubnetRule(_Route53Record):
         self.index = index
         self.collection_id = collection_id
         self.default = default
+        self.location_name = location_name
 
         self.target_dns_name = f'_octodns-{pool_name}-pool.{record.fqdn}'
 
@@ -549,7 +554,7 @@ class _Route53DynamicSubnetRule(_Route53Record):
                 },
                 'CidrRoutingConfig': {
                     'CollectionId': self.collection_id,
-                    'LocationName': '*' if self.default else f'r{self.index}',
+                    'LocationName': '*' if self.default else self.location_name,
                 },
                 'Name': self.fqdn,
                 'SetIdentifier': self.identifer,
@@ -1208,13 +1213,15 @@ class Route53Provider(_AuthMixin, BaseProvider):
 
         return self._r53_rrsets[zone_id]
 
-    @staticmethod
-    def _cidr_collection_name(zone_name):
-        # Remove trailing dot and replace dots with dashes for a valid name
-        return f'octodns-{zone_name.rstrip(".").replace(".", "-")}'
+    _CIDR_COLLECTION_NAME = 'octodns'
 
-    def _get_cidr_collection(self, zone_name):
-        name = self._cidr_collection_name(zone_name)
+    @staticmethod
+    def _cidr_location_name(cidrs):
+        key = ','.join(sorted(cidrs))
+        return sha256(key.encode()).hexdigest()[:16]
+
+    def _get_cidr_collection(self):
+        name = self._CIDR_COLLECTION_NAME
         more = True
         params = {}
         while more:
@@ -1227,17 +1234,17 @@ class Route53Provider(_AuthMixin, BaseProvider):
                 params['NextToken'] = resp['NextToken']
         return None
 
-    def _create_cidr_collection(self, zone_name):
-        name = self._cidr_collection_name(zone_name)
+    def _create_cidr_collection(self):
+        name = self._CIDR_COLLECTION_NAME
         resp = self._conn.create_cidr_collection(
             Name=name, CallerReference=uuid4().hex
         )
         return resp['Collection']['Id']
 
-    def _get_or_create_cidr_collection(self, zone_name):
-        collection_id = self._get_cidr_collection(zone_name)
+    def _get_or_create_cidr_collection(self):
+        collection_id = self._get_cidr_collection()
         if collection_id is None:
-            collection_id = self._create_cidr_collection(zone_name)
+            collection_id = self._create_cidr_collection()
         return collection_id
 
     def _load_cidr_blocks(self, collection_id):
@@ -1288,17 +1295,6 @@ class Route53Provider(_AuthMixin, BaseProvider):
                             'CidrList': to_add,
                         }
                     )
-
-        # Remove locations that are no longer needed
-        for loc_name in existing:
-            if loc_name not in desired_locations:
-                changes.append(
-                    {
-                        'LocationName': loc_name,
-                        'Action': 'DELETE_IF_EXISTS',
-                        'CidrList': sorted(existing[loc_name]),
-                    }
-                )
 
         if changes:
             self._conn.change_cidr_collection(Id=collection_id, Changes=changes)
@@ -2042,20 +2038,18 @@ class Route53Provider(_AuthMixin, BaseProvider):
                     continue
                 if _type != rrset['Type']:
                     continue
-                location_name = rrset['CidrRoutingConfig']['LocationName']
-                if location_name == '*':
+                existing_loc = rrset['CidrRoutingConfig']['LocationName']
+                if existing_loc == '*':
                     # Default/catchall rule, no CIDR blocks to check
                     continue
-                collection_id = rrset['CidrRoutingConfig']['CollectionId']
-                cidr_blocks = self._load_cidr_blocks(collection_id)
-                existing_cidrs = sorted(cidr_blocks.get(location_name, []))
                 # Find the matching rule by index from SetIdentifier
                 _id = rrset['SetIdentifier']
                 i = int(_id.split('-', 1)[0])
                 rules = record.dynamic.rules
                 if i < len(rules):
-                    desired_cidrs = sorted(rules[i].data.get('subnets', []))
-                    if existing_cidrs != desired_cidrs:
+                    desired_cidrs = rules[i].data.get('subnets', [])
+                    desired_loc = self._cidr_location_name(desired_cidrs)
+                    if existing_loc != desired_loc:
                         self.log.info(
                             '_extra_changes_dynamic_needs_update: '
                             'cidr-location caused update of %s:%s',
@@ -2168,12 +2162,13 @@ class Route53Provider(_AuthMixin, BaseProvider):
         for record in desired.records:
             if not getattr(record, 'dynamic', False):
                 continue
-            for i, rule in enumerate(record.dynamic.rules):
+            for rule in record.dynamic.rules:
                 subnets = rule.data.get('subnets', [])
                 if subnets:
-                    desired_locations[f'r{i}'] = sorted(subnets)
+                    loc = self._cidr_location_name(subnets)
+                    desired_locations[loc] = sorted(subnets)
         if desired_locations:
-            collection_id = self._get_or_create_cidr_collection(desired.name)
+            collection_id = self._get_or_create_cidr_collection()
 
         if collection_id is None:
             # Check if any existing records being deleted/updated use
@@ -2183,17 +2178,13 @@ class Route53Provider(_AuthMixin, BaseProvider):
                 if existing and getattr(existing, 'dynamic', False):
                     for rule in existing.dynamic.rules:
                         if rule.data.get('subnets', []):
-                            collection_id = self._get_cidr_collection(
-                                desired.name
-                            )
+                            collection_id = self._get_cidr_collection()
                             break
                     if collection_id is not None:
                         break
 
-        if collection_id is not None:
+        if collection_id is not None and desired_locations:
             self._sync_cidr_locations(collection_id, desired_locations)
-            if not desired_locations:
-                self._conn.delete_cidr_collection(Id=collection_id)
 
         batch = []
         batch_rs_count = 0
