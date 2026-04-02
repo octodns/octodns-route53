@@ -1431,13 +1431,8 @@ class Route53Provider(_AuthMixin, BaseProvider):
                 # Make a copy of the record in case we have to muck with it
                 dynamic = record.dynamic
 
-                has_geos = False
-                has_subnets = False
-                for rule in dynamic.rules:
-                    if rule.data.get('geos', []):
-                        has_geos = True
-                    if rule.data.get('subnets', []):
-                        has_subnets = True
+                has_geos = any(r.data.get('geos') for r in dynamic.rules)
+                has_subnets = any(r.data.get('subnets') for r in dynamic.rules)
                 if has_geos and has_subnets:
                     msg = (
                         f'mixed geo and subnet rules not supported '
