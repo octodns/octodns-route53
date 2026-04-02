@@ -4862,12 +4862,12 @@ class TestRoute53Provider(TestCase):
         self.assertNotIn('col-1234', provider._cidr_collections)
         stubber.assert_no_pending_responses()
 
-    def test_sync_cidr_locations_replace_blocks(self):
+    def test_sync_cidr_locations_add_blocks(self):
         provider, stubber = self._get_stubbed_provider()
 
         loc = '7bc59b45c0e21e40'
 
-        # Location has old blocks that need full replacement
+        # Location has existing blocks, new ones need adding
         provider._cidr_collections = {
             'col-1234': {loc: ['40.71.0.0/16', '10.0.0.0/8']}
         }
@@ -4880,53 +4880,34 @@ class TestRoute53Provider(TestCase):
                 'Changes': [
                     {
                         'LocationName': loc,
-                        'Action': 'DELETE_IF_EXISTS',
-                        'CidrList': ['10.0.0.0/8', '40.71.0.0/16'],
-                    },
-                    {
-                        'LocationName': loc,
                         'Action': 'PUT',
                         'CidrList': ['97.120.173.0/24'],
-                    },
-                ],
-            },
-        )
-
-        desired = {loc: ['97.120.173.0/24']}
-        provider._sync_cidr_locations('col-1234', desired)
-
-        self.assertNotIn('col-1234', provider._cidr_collections)
-        stubber.assert_no_pending_responses()
-
-    def test_sync_cidr_locations_remove_blocks(self):
-        provider, stubber = self._get_stubbed_provider()
-
-        loc = '93997fe8a8121085'
-
-        # Location has extra blocks that need removing, no new ones to add
-        provider._cidr_collections = {
-            'col-1234': {loc: ['10.0.0.0/8', '172.16.0.0/12']}
-        }
-
-        stubber.add_response(
-            'change_cidr_collection',
-            {'Id': 'change-id-1234'},
-            {
-                'Id': 'col-1234',
-                'Changes': [
-                    {
-                        'LocationName': loc,
-                        'Action': 'DELETE_IF_EXISTS',
-                        'CidrList': ['172.16.0.0/12'],
                     }
                 ],
             },
         )
 
-        desired = {loc: ['10.0.0.0/8']}
+        desired = {loc: ['40.71.0.0/16', '10.0.0.0/8', '97.120.173.0/24']}
         provider._sync_cidr_locations('col-1234', desired)
 
         self.assertNotIn('col-1234', provider._cidr_collections)
+        stubber.assert_no_pending_responses()
+
+    def test_sync_cidr_locations_existing_subset(self):
+        provider, stubber = self._get_stubbed_provider()
+
+        loc = '93997fe8a8121085'
+
+        # Desired is a subset of existing, nothing to add
+        provider._cidr_collections = {
+            'col-1234': {loc: ['10.0.0.0/8', '172.16.0.0/12']}
+        }
+
+        desired = {loc: ['10.0.0.0/8']}
+        provider._sync_cidr_locations('col-1234', desired)
+
+        # No API call should be made, cache should remain
+        self.assertIn('col-1234', provider._cidr_collections)
         stubber.assert_no_pending_responses()
 
     def test_sync_cidr_locations_no_changes(self):

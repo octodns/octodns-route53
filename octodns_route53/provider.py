@@ -204,9 +204,8 @@ class _Route53Record(EqualityTupleMixin):
                     )
                 )
             else:
-                # There's no geo's for this rule so it's the catchall that will
-                # just point things that don't match any geo rules to the
-                # specified pool
+                # Catchall for geo records that will just point things that
+                # don't match any geo rules to the specified pool
                 ret.add(
                     _Route53DynamicRule(
                         provider, hosted_zone_id, record, pool_name, i, creating
@@ -1274,27 +1273,18 @@ class Route53Provider(_AuthMixin, BaseProvider):
         for loc_name, cidrs in desired_locations.items():
             desired_set = set(cidrs)
             existing_set = set(existing.get(loc_name, []))
-            if desired_set != existing_set:
-                # DELETE blocks that are no longer wanted
-                to_remove = sorted(existing_set - desired_set)
-                if to_remove:
-                    changes.append(
-                        {
-                            'LocationName': loc_name,
-                            'Action': 'DELETE_IF_EXISTS',
-                            'CidrList': to_remove,
-                        }
-                    )
-                # PUT blocks that need to be added
-                to_add = sorted(desired_set - existing_set)
-                if to_add:
-                    changes.append(
-                        {
-                            'LocationName': loc_name,
-                            'Action': 'PUT',
-                            'CidrList': to_add,
-                        }
-                    )
+            # we don't/can't delete CIRD locations since they may be in use by
+            # other records or zones
+            to_add = sorted(desired_set - existing_set)
+            # PUT blocks that need to be added
+            if to_add:
+                changes.append(
+                    {
+                        'LocationName': loc_name,
+                        'Action': 'PUT',
+                        'CidrList': to_add,
+                    }
+                )
 
         if changes:
             self._conn.change_cidr_collection(Id=collection_id, Changes=changes)
