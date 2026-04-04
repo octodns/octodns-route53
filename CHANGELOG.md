@@ -1,3 +1,14 @@
+## 1.1.0 - 2026-04-03
+
+Minor:
+* Add subnet/CIDR-based routing support - [#129](https://github.com/octodns/octodns-route53/pull/129)
+* Add VPC-based zone filtering with vpc_id, vpc_region, and vpc_multi_action configuration options - [#124](https://github.com/octodns/octodns-route53/pull/124)
+* New provider paramater, private, added to enable specifying zone type. Note that VPC associations are managed - [#109](https://github.com/octodns/octodns-route53/pull/109)
+* Multiple zones with the same name will now throw an error message, behavior previously would not have been deterministic - [#109](https://github.com/octodns/octodns-route53/pull/109)
+
+Patch:
+* Use new [changelet](https://github.com/octodns/changelet) tooling - [#108](https://github.com/octodns/octodns-route53/pull/108)
+
 ## v1.0.1 - 2025-05-05 - Only clamp when forced
 
 * Don't clamp urllib3 unless we're on 3.8 or 3.9 where it's actually needed
