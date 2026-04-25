@@ -1,24 +1,43 @@
 from octodns.equality import EqualityTupleMixin
 from octodns.record import Record, ValuesMixin
 
+try:  # pragma: no cover
+    from octodns.record.validator import ValueValidator
+
+    _HAS_VALUE_VALIDATOR = True
+except ImportError:  # pragma: no cover
+    _HAS_VALUE_VALIDATOR = False
+
+
+def _validate_route53_alias_values(data):
+    if not isinstance(data, (list, tuple)):
+        data = (data,)
+    reasons = []
+    for value in data:
+        if 'type' not in value:
+            reasons.append('missing type')
+        if Route53AliasRecord.is_service_alias(value.get('name') or ''):
+            if not value.get('hosted-zone-id'):
+                reasons.append('service alias without hosted-zone-id')
+        else:
+            if value.get('hosted-zone-id'):
+                reasons.append('hosted-zone-id on a non-service value')
+    return reasons
+
+
+if _HAS_VALUE_VALIDATOR:  # pragma: no cover
+
+    class _Route53AliasValueValidator(ValueValidator):
+        def validate(self, value_cls, data, _type):
+            return _validate_route53_alias_values(data)
+
 
 class _Route53AliasValue(EqualityTupleMixin, dict):
-    @classmethod
-    def validate(cls, data, _type):
-        if not isinstance(data, (list, tuple)):
-            data = (data,)
-        reasons = []
-        for value in data:
-            if 'type' not in value:
-                reasons.append('missing type')
-            if Route53AliasRecord.is_service_alias(value.get('name') or ''):
-                if not value.get('hosted-zone-id'):
-                    reasons.append('service alias without hosted-zone-id')
-            else:
-                if value.get('hosted-zone-id'):
-                    reasons.append('hosted-zone-id on a non-service value')
+    if not _HAS_VALUE_VALIDATOR:  # pragma: no cover
 
-        return reasons
+        @classmethod
+        def validate(cls, data, _type):
+            return _validate_route53_alias_values(data)
 
     @classmethod
     def process(cls, values):
@@ -79,6 +98,9 @@ class _Route53AliasValue(EqualityTupleMixin, dict):
 class Route53AliasRecord(ValuesMixin, Record):
     _type = 'Route53Provider/ALIAS'
     _value_type = _Route53AliasValue
+
+    if _HAS_VALUE_VALIDATOR:  # pragma: no cover
+        VALIDATORS = [_Route53AliasValueValidator('route53-alias-value')]
 
     # Since Route53's alias type reuses the same keys for different types of
     # records with nothing to definitively indicate whether it's a service or
