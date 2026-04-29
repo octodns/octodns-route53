@@ -24,6 +24,23 @@ from octodns_route53.provider import (
 )
 from octodns_route53.record import Route53AliasRecord, _Route53AliasValue
 
+try:
+    from octodns_route53.record import _Route53AliasValueValidator
+
+    _route53_alias_validator = _Route53AliasValueValidator(
+        'route53-alias-value'
+    )
+
+    def _validate_alias(data):
+        return _route53_alias_validator.validate(
+            _Route53AliasValue, data, Route53AliasRecord._type
+        )
+
+except ImportError:
+
+    def _validate_alias(data):
+        return _Route53AliasValue.validate(data, Route53AliasRecord._type)
+
 
 class SimpleProvider(object):
     SUPPORTS_GEO = False
@@ -6387,93 +6404,79 @@ class TestRoute53AliasRecord(TestCase):
         v0.__repr__()
 
         # No type
-        self.assertEqual(
-            ['missing type'],
-            _Route53AliasValue.validate({}, Route53AliasRecord._type),
-        )
+        self.assertEqual(['missing type'], _validate_alias({}))
 
         # service alias w/o hosted-zone-id
         self.assertEqual(
             ['service alias without hosted-zone-id'],
-            _Route53AliasValue.validate(
+            _validate_alias(
                 {
                     'name': 'foo.bar.amazonaws.com.cn',
                     'type': Route53AliasRecord._type,
-                },
-                Route53AliasRecord._type,
+                }
             ),
         )
 
         # local zone alias with hosted-zone-id
         self.assertEqual(
             ['hosted-zone-id on a non-service value'],
-            _Route53AliasValue.validate(
+            _validate_alias(
                 {
                     'name': 'www',
                     'hosted-zone-id': 'bad',
                     'type': Route53AliasRecord._type,
-                },
-                Route53AliasRecord._type,
+                }
             ),
         )
 
         # valid local zone
-        self.assertEqual(
-            [],
-            _Route53AliasValue.validate(
-                {'name': 'name', 'type': 'A'}, Route53AliasRecord._type
-            ),
-        )
+        self.assertEqual([], _validate_alias({'name': 'name', 'type': 'A'}))
 
         # valid service
         self.assertEqual(
             [],
-            _Route53AliasValue.validate(
+            _validate_alias(
                 {
                     'name': 'foo.bar.amazonaws.com.cn',
                     'hosted-zone-id': 'good',
                     'type': 'A',
-                },
-                Route53AliasRecord._type,
+                }
             ),
         )
 
         # valid service (cloudfront)
         self.assertEqual(
             [],
-            _Route53AliasValue.validate(
+            _validate_alias(
                 {
                     'name': 'foo.bar.cloudfront.net.',
                     'hosted-zone-id': 'good',
                     'type': 'A',
-                },
-                Route53AliasRecord._type,
+                }
             ),
         )
 
         # valid service (awsglobalaccelerator)
         self.assertEqual(
             [],
-            _Route53AliasValue.validate(
+            _validate_alias(
                 {
                     'name': 'foo.awsglobalaccelerator.com.',
                     'hosted-zone-id': 'good',
                     'type': 'A',
-                },
-                Route53AliasRecord._type,
+                }
             ),
         )
 
         # valid service (elasticbeanstalk)
         self.assertEqual(
             [],
-            _Route53AliasValue.validate(
+            _validate_alias(
                 {
                     'name': 'foo.bar.elasticbeanstalk.com.',
                     'hosted-zone-id': 'good',
                     'type': 'A',
-                },
-                Route53AliasRecord._type,
+                }
             ),
         )
 
