@@ -5536,6 +5536,106 @@ class TestRoute53Provider(TestCase):
         self.assertEqual('DELETE', ret[0]['Action'])
         self.assertEqual('CREATE', ret[1]['Action'])
 
+    def test_mod_Update_trailing_dot_workaround(self):
+        provider = Route53Provider('test', 'abc', '123')
+        provider._gc_health_checks = lambda *a, **kw: None
+
+        zone = Zone('unit.tests.', [])
+
+        # CNAME: only difference is trailing dot on value → should force
+        # DELETE+CREATE instead of UPSERT. The existing record lacks a trailing
+        # dot (as Route53 stores it), so we need lenient to construct it.
+        cname_existing = Record.new(
+            zone,
+            'cname',
+            {'ttl': 300, 'type': 'CNAME', 'value': 'target.unit.tests'},
+            lenient=True,
+        )
+        cname_new = Record.new(
+            zone,
+            'cname',
+            {'ttl': 300, 'type': 'CNAME', 'value': 'target.unit.tests.'},
+        )
+        existing_rrsets = [
+            {
+                'Name': 'cname.unit.tests.',
+                'Type': 'CNAME',
+                'TTL': 300,
+                'ResourceRecords': [{'Value': 'target.unit.tests'}],
+            }
+        ]
+        change = Update(cname_existing, cname_new)
+        ret = provider._mod_Update(change, 'z42', existing_rrsets)
+        actions = [m['Action'] for m in ret]
+        self.assertIn('DELETE', actions)
+        self.assertIn('CREATE', actions)
+        self.assertNotIn('UPSERT', actions)
+
+        # MX: trailing dot on exchange portion → force DELETE+CREATE
+        mx_existing = Record.new(
+            zone,
+            'mx',
+            {
+                'ttl': 300,
+                'type': 'MX',
+                'values': [{'preference': 10, 'exchange': 'mail.unit.tests'}],
+            },
+            lenient=True,
+        )
+        mx_new = Record.new(
+            zone,
+            'mx',
+            {
+                'ttl': 300,
+                'type': 'MX',
+                'values': [{'preference': 10, 'exchange': 'mail.unit.tests.'}],
+            },
+        )
+        existing_rrsets_mx = [
+            {
+                'Name': 'mx.unit.tests.',
+                'Type': 'MX',
+                'TTL': 300,
+                'ResourceRecords': [{'Value': '10 mail.unit.tests'}],
+            }
+        ]
+        change = Update(mx_existing, mx_new)
+        ret = provider._mod_Update(change, 'z42', existing_rrsets_mx)
+        actions = [m['Action'] for m in ret]
+        self.assertIn('DELETE', actions)
+        self.assertIn('CREATE', actions)
+        self.assertNotIn('UPSERT', actions)
+
+        # CNAME real value change → should still UPSERT, not DELETE+CREATE
+        cname_different = Record.new(
+            zone,
+            'cname',
+            {'ttl': 300, 'type': 'CNAME', 'value': 'other.unit.tests.'},
+        )
+        change = Update(cname_existing, cname_different)
+        ret = provider._mod_Update(change, 'z42', existing_rrsets)
+        actions = [m['Action'] for m in ret]
+        self.assertIn('UPSERT', actions)
+        self.assertNotIn('DELETE', actions)
+        self.assertNotIn('CREATE', actions)
+
+        # Existing rrset already has the trailing dot (values are identical) →
+        # no diff, should stay as UPSERT
+        existing_rrsets_with_dot = [
+            {
+                'Name': 'cname.unit.tests.',
+                'Type': 'CNAME',
+                'TTL': 300,
+                'ResourceRecords': [{'Value': 'target.unit.tests.'}],
+            }
+        ]
+        change = Update(cname_new, cname_new)
+        ret = provider._mod_Update(change, 'z42', existing_rrsets_with_dot)
+        actions = [m['Action'] for m in ret]
+        self.assertIn('UPSERT', actions)
+        self.assertNotIn('DELETE', actions)
+        self.assertNotIn('CREATE', actions)
+
 
 class DummyProvider(object):
     def get_health_check_id(self, *args, **kwargs):

@@ -1600,6 +1600,34 @@ class Route53Provider(_AuthMixin, BaseProvider):
         '''
         return [r.mod(action, existing_rrsets) for r in records]
 
+    def _find_simple_rrset(self, record, existing_rrsets):
+        '''Returns the first rrset matching record's fqdn+type that has no
+        SetIdentifier or AliasTarget (i.e. a plain, non-dynamic rrset), or
+        None if not found.'''
+        if not existing_rrsets:
+            return None
+        for rrset in existing_rrsets:
+            if (
+                rrset.get('Name') == record.fqdn
+                and rrset.get('Type') == record._type
+                and 'SetIdentifier' not in rrset
+                and 'AliasTarget' not in rrset
+            ):
+                return rrset
+        return None
+
+    def _only_trailing_dot_diff(self, rrset, record):
+        '''Returns True when the existing rrset and the new record's values
+        differ only by trailing dots — the case Route53's API silently ignores
+        on UPSERT.'''
+        existing = sorted(r['Value'] for r in rrset.get('ResourceRecords', []))
+        new = sorted(record.values)
+        if existing == new:
+            return False
+        return sorted(v.rstrip('.') for v in existing) == sorted(
+            v.rstrip('.') for v in new
+        )
+
     @property
     def health_checks(self):
         if self._health_checks is None:
@@ -1919,6 +1947,24 @@ class Route53Provider(_AuthMixin, BaseProvider):
         for new_record in new_records:
             if new_record in existing_records:
                 upserts.add(new_record)
+
+        # Route53 silently ignores UPSERTs whose only difference from the
+        # stored value is a trailing dot (e.g. CNAME target "foo.com" →
+        # "foo.com."). Work around it by routing those to DELETE+CREATE in
+        # the same ChangeBatch, which Route53 applies atomically.
+        # See https://github.com/octodns/octodns-route53/issues/96
+        forced = set()
+        for record in upserts:
+            rrset = self._find_simple_rrset(record, existing_rrsets)
+            if rrset is not None and self._only_trailing_dot_diff(
+                rrset, record
+            ):
+                forced.add(record)
+        if forced:
+            upserts -= forced
+            forced_existing = {er for er in existing_records if er in forced}
+            deletes |= forced_existing
+            creates |= forced
 
         return (
             self._gen_mods('DELETE', deletes, existing_rrsets)
