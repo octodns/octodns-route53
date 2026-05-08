@@ -3090,6 +3090,96 @@ class TestRoute53Provider(TestCase):
         self.assertEqual('42', id)
         stubber.assert_no_pending_responses()
 
+    def test_health_check_wildcard_record(self):
+        provider, stubber = self._get_stubbed_provider()
+
+        # Test wildcard record with health check
+        # Wildcard characters (*) are not allowed in Route53 tags
+        # Should be sanitized to avoid API errors
+
+        health_checks = []
+        stubber.add_response(
+            'list_health_checks',
+            {
+                'HealthChecks': health_checks,
+                'IsTruncated': False,
+                'MaxItems': '100',
+                'Marker': '',
+            },
+        )
+
+        health_check_config = {
+            'Disabled': False,
+            'EnableSNI': True,
+            'Inverted': False,
+            'FailureThreshold': 6,
+            'FullyQualifiedDomainName': 'api.example.com',
+            'IPAddress': '4.2.3.4',
+            'MeasureLatency': True,
+            'Port': 443,
+            'RequestInterval': 10,
+            'ResourcePath': '/_health',
+            'Type': 'HTTPS',
+        }
+        stubber.add_response(
+            'create_health_check',
+            {
+                'HealthCheck': {
+                    'Id': '44',
+                    'CallerReference': self.caller_ref,
+                    'HealthCheckConfig': health_check_config,
+                    'HealthCheckVersion': 1,
+                },
+                'Location': 'http://url',
+            },
+            {'CallerReference': ANY, 'HealthCheckConfig': health_check_config},
+        )
+
+        # Verify that the tag value is sanitized (no * characters)
+        # The sanitized name should replace * with -
+        stubber.add_response(
+            'change_tags_for_resource',
+            {},
+            {
+                'ResourceType': 'healthcheck',
+                'ResourceId': '44',
+                'AddTags': [
+                    {
+                        'Key': 'Name',
+                        'Value': '-.api.unit.tests.:A - 4.2.3.4',  # * replaced with -
+                    }
+                ],
+            },
+        )
+
+        # Create a wildcard A record with dynamic config
+        record = Record.new(
+            self.expected,
+            '*.api',  # Wildcard record name
+            {
+                'ttl': 60,
+                'type': 'A',
+                'values': ['4.2.3.4'],
+                'dynamic': {
+                    'pools': {'default': {'values': [{'value': '4.2.3.4'}]}},
+                    'rules': [{'pool': 'default'}],
+                },
+                'octodns': {
+                    'healthcheck': {
+                        'host': 'api.example.com',
+                        'path': '/_health',
+                        'port': 443,
+                        'protocol': 'HTTPS',
+                    }
+                },
+            },
+        )
+
+        value = record.dynamic.pools['default'].data['values'][0]['value']
+        id = provider.get_health_check_id(record, value, 'obey', True)
+        self.assertEqual('44', id)
+        stubber.assert_no_pending_responses()
+
     def test_health_check_provider_options(self):
         provider, stubber = self._get_stubbed_provider()
         record = Record.new(

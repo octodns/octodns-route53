@@ -23,11 +23,25 @@ from .record import Route53AliasRecord
 
 octal_re = re.compile(r'\\(\d\d\d)')
 
+# Route53 health check tags can only contain: letters, numbers, spaces,
+# and these special characters: _ . : / = + - @
+# https://docs.aws.amazon.com/Route53/latest/APIReference/API_ChangeTagsForResource.html
+_route53_tag_invalid_chars_re = re.compile(r'[^a-zA-Z0-9 _.:/=+\-@]')
+
 
 def _octal_replace(s):
     # See http://docs.aws.amazon.com/Route53/latest/DeveloperGuide/
     #     DomainNameFormat.html
     return octal_re.sub(lambda m: chr(int(m.group(1), 8)), s)
+
+
+def _sanitize_route53_tag_value(value):
+    # Sanitize a string for use in Route53 health check tags. Route53 tags
+    # can only contain letters, numbers, spaces, and the following special
+    # characters: _ . : / = + - @
+    # See https://docs.aws.amazon.com/Route53/latest/APIReference/API_ChangeTagsForResource.html
+    # Invalid characters (like * in wildcard DNS names) are replaced with '-'
+    return _route53_tag_invalid_chars_re.sub('-', value)
 
 
 def _healthcheck_ref_prefix(version, record_type, record_fqdn):
@@ -1812,7 +1826,10 @@ class Route53Provider(_AuthMixin, BaseProvider):
 
         # Set a Name for the benefit of the UI
         value_or_host = value or healthcheck_host
-        name = f'{record.fqdn}:{record._type} - {value_or_host}'
+        # Sanitize for Route53 tag compliance (e.g., wildcard * not allowed)
+        name = _sanitize_route53_tag_value(
+            f'{record.fqdn}:{record._type} - {value_or_host}'
+        )
         self._conn.change_tags_for_resource(
             ResourceType='healthcheck',
             ResourceId=id,
