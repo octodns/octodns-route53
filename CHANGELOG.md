@@ -1,3 +1,11 @@
+## 1.3.0 - 2026-07-22
+
+Minor:
+* Modernize packaging: move build metadata from setup.py into pyproject.toml, remove setup.py; require Python >=3.10 - [#139](https://github.com/octodns/octodns-route53/pull/139)
+
+Patch:
+* Fix wildcard and long fqdn handling in Route53Provider._gc_health_checks - [#141](https://github.com/octodns/octodns-route53/pull/141)
+
 ## 1.2.0 - 2026-06-29
 
 Minor:

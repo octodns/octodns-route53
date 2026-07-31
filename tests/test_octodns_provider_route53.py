@@ -3449,6 +3449,155 @@ class TestRoute53Provider(TestCase):
         provider._gc_health_checks(record, [])
         stubber.assert_no_pending_responses()
 
+    def test_health_check_gc_wildcard_vs_sibling(self):
+        # Regression test for #140: a wildcard record's fqdn contains a
+        # literal `*` which, prior to the fix, was interpolated straight
+        # into the gc regex and interpreted as a quantifier rather than a
+        # literal character. That meant the wildcard's own stale health
+        # checks were never matched (never gc'd, a permanent leak) while a
+        # same-name non-wildcard sibling's in-use health checks *were*
+        # matched and deleted (breaking its failover).
+        provider, stubber = self._get_stubbed_provider()
+
+        wildcard_fqdn = '*.foo.unit.tests.'
+        sibling_fqdn = 'foo.unit.tests.'
+
+        wild_prefix = _healthcheck_ref_prefix(
+            Route53Provider.HEALTH_CHECK_VERSION, 'A', wildcard_fqdn
+        )
+        sibling_prefix = _healthcheck_ref_prefix(
+            Route53Provider.HEALTH_CHECK_VERSION, 'A', sibling_fqdn
+        )
+
+        health_check_config = {
+            'Disabled': False,
+            'EnableSNI': True,
+            'Inverted': False,
+            'Type': 'HTTPS',
+            'FullyQualifiedDomainName': 'unit.tests',
+            'IPAddress': '4.2.3.4',
+            'ResourcePath': '/_dns',
+            'Port': 443,
+            'MeasureLatency': True,
+            'RequestInterval': 10,
+            'FailureThreshold': 6,
+        }
+        health_checks = [
+            {
+                'Id': 'wild-stale-id',
+                'CallerReference': f'{wild_prefix}:wild-stale',
+                'HealthCheckConfig': health_check_config,
+                'HealthCheckVersion': 2,
+            },
+            {
+                'Id': 'wild-in-use-id',
+                'CallerReference': f'{wild_prefix}:wild-in-use',
+                'HealthCheckConfig': health_check_config,
+                'HealthCheckVersion': 2,
+            },
+            {
+                'Id': 'sibling-in-use-id',
+                'CallerReference': f'{sibling_prefix}:sibling-in-use',
+                'HealthCheckConfig': health_check_config,
+                'HealthCheckVersion': 2,
+            },
+        ]
+        stubber.add_response(
+            'list_health_checks',
+            {
+                'HealthChecks': health_checks,
+                'IsTruncated': False,
+                'MaxItems': '100',
+                'Marker': '',
+            },
+        )
+
+        wildcard_record = Record.new(
+            self.expected, '*.foo', {'ttl': 61, 'type': 'A', 'value': '2.2.3.4'}
+        )
+
+        # only the wildcard's own stale health check should be deleted, its
+        # in-use one and the sibling's in-use one must be left alone
+        stubber.add_response(
+            'delete_health_check', {}, {'HealthCheckId': 'wild-stale-id'}
+        )
+        provider._gc_health_checks(
+            wildcard_record, [DummyR53Record('wild-in-use-id')]
+        )
+        stubber.assert_no_pending_responses()
+
+        # gc'ing the sibling only ever touches its own health checks
+        sibling_record = Record.new(
+            self.expected, 'foo', {'ttl': 61, 'type': 'A', 'value': '2.2.3.4'}
+        )
+        provider._gc_health_checks(
+            sibling_record, [DummyR53Record('sibling-in-use-id')]
+        )
+        stubber.assert_no_pending_responses()
+
+    def test_health_check_gc_long_fqdn(self):
+        # Regression test for the hashing-related gc gap found while fixing
+        # #140: for long fqdns _healthcheck_ref_prefix hashes the fqdn
+        # rather than embedding it directly, so gc has to build its
+        # matching prefix the same way rather than matching on the raw
+        # fqdn, or it'll never find (and thus never clean up) those health
+        # checks.
+        provider, stubber = self._get_stubbed_provider()
+
+        long_fqdn = (
+            'this-is-a-very-longggggggg-record-for-testing-purposes.'
+            'unit.tests.'
+        )
+        prefix = _healthcheck_ref_prefix(
+            Route53Provider.HEALTH_CHECK_VERSION, 'A', long_fqdn
+        )
+        # the prefix should have been hashed, not the raw fqdn
+        self.assertNotIn(long_fqdn, prefix)
+
+        health_check_config = {
+            'Disabled': False,
+            'EnableSNI': True,
+            'Inverted': False,
+            'Type': 'HTTPS',
+            'FullyQualifiedDomainName': 'unit.tests',
+            'IPAddress': '4.2.3.4',
+            'ResourcePath': '/_dns',
+            'Port': 443,
+            'MeasureLatency': True,
+            'RequestInterval': 10,
+            'FailureThreshold': 6,
+        }
+        health_checks = [
+            {
+                'Id': 'long-stale-id',
+                'CallerReference': f'{prefix}:long-stale',
+                'HealthCheckConfig': health_check_config,
+                'HealthCheckVersion': 2,
+            }
+        ]
+        stubber.add_response(
+            'list_health_checks',
+            {
+                'HealthChecks': health_checks,
+                'IsTruncated': False,
+                'MaxItems': '100',
+                'Marker': '',
+            },
+        )
+
+        record = Record.new(
+            self.expected,
+            'this-is-a-very-longggggggg-record-for-testing-purposes',
+            {'ttl': 61, 'type': 'A', 'value': '2.2.3.4'},
+        )
+        self.assertEqual(long_fqdn, record.fqdn)
+
+        stubber.add_response(
+            'delete_health_check', {}, {'HealthCheckId': 'long-stale-id'}
+        )
+        provider._gc_health_checks(record, [])
+        stubber.assert_no_pending_responses()
+
     def test_legacy_health_check_gc(self):
         provider, stubber = self._get_stubbed_provider()
 

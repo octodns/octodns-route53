@@ -1870,7 +1870,17 @@ class Route53Provider(_AuthMixin, BaseProvider):
         # Now we need to run through ALL the health checks looking for those
         # that apply to this record, deleting any that do and are no longer in
         # use
-        expected_re = re.compile(fr'^\d\d\d\d:{record._type}:{record.fqdn}:')
+        # Build the expected CallerReference prefix the same way we do when
+        # creating/finding health checks (see _healthcheck_ref_prefix); this
+        # handles both wildcard fqdns (the `*` must be treated as a literal,
+        # not a regex quantifier) and long fqdns (which get hashed rather than
+        # embedded directly). We drop the leading version and match \d\d\d\d
+        # instead so GC still spans all versions.
+        prefix = _healthcheck_ref_prefix(
+            self.HEALTH_CHECK_VERSION, record._type, record.fqdn
+        )
+        ident = prefix.split(':', 1)[1]
+        expected_re = re.compile(fr'^\d\d\d\d:{re.escape(ident)}:')
         # UNITL 1.0: we'll clean out the previous version of Route53 health
         # checks as best as we can.
         expected_legacy_host = record.fqdn[:-1]
