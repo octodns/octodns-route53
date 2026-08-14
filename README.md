@@ -151,6 +151,10 @@ octodns-1: foo.example.com.
 octodns-2: bar.other.com.
 ```
 
+#### A note on escaping
+
+When you need to escape a character in a string, such as the semi-colon in a `TXT` record like `v=DMARC1; p=reject`, you must ensure you double-escape the character. In the above example, the correct string is `v=DMARC1\\; p=reject`. If you view this in the AWS Route 53 console, it will appear incorrect (it will only show a single backslash). This is a visual bug in the AWS console only, the DNS record on the wire will not have any backslashes and will be interpreted as expected.
+
 #### Processors
 
 Ignores AWS ACM validation CNAME records.
