@@ -13,6 +13,7 @@ from uuid import uuid4
 from pycountry_convert import country_alpha2_to_continent_code
 
 from octodns.equality import EqualityTupleMixin
+from octodns.idna import idna_encode
 from octodns.provider import ProviderException, SupportsException
 from octodns.provider.base import BaseProvider
 from octodns.record import Create, Record, Update
@@ -801,6 +802,7 @@ class Route53Provider(_AuthMixin, BaseProvider):
         vpc_id=None,
         vpc_region=None,
         vpc_multi_action='error',
+        zone_ids=None,
         *args,
         **kwargs,
     ):
@@ -832,6 +834,24 @@ class Route53Provider(_AuthMixin, BaseProvider):
                 '(delegation sets only apply to public zones)'
             )
 
+        # Validate and normalize zone_ids, a name -> hosted zone id map used
+        # to pin the exact zone to use when multiple zones share a name,
+        # e.g. staging a replacement public zone ahead of an NS cutover.
+        if zone_ids is None:
+            zone_ids = {}
+        elif not isinstance(zone_ids, dict):
+            raise Route53ProviderException('zone_ids must be a dict')
+        normalized_zone_ids = {}
+        for name, zone_id in zone_ids.items():
+            if not isinstance(name, str) or not isinstance(zone_id, str):
+                raise Route53ProviderException(
+                    'zone_ids keys and values must be strings'
+                )
+            name = idna_encode(name)
+            if not name.endswith('.'):
+                name += '.'
+            normalized_zone_ids[name] = self._normalize_zone_id(zone_id)
+
         self.max_changes = max_changes
         self.delegation_set_id = delegation_set_id
         self.get_zones_by_name = get_zones_by_name
@@ -839,12 +859,13 @@ class Route53Provider(_AuthMixin, BaseProvider):
         self.vpc_id = vpc_id
         self.vpc_region = vpc_region
         self.vpc_multi_action = vpc_multi_action
+        self.zone_ids = normalized_zone_ids
 
         self.log = logging.getLogger(f'Route53Provider[{id}]')
         self.log.info(
             '__init__: id=%s, access_key_id=%s, max_changes=%d, '
             'delegation_set_id=%s, get_zones_by_name=%s, vpc_id=%s, '
-            'vpc_region=%s, vpc_multi_action=%s',
+            'vpc_region=%s, vpc_multi_action=%s, zone_ids=%s',
             id,
             access_key_id,
             max_changes,
@@ -853,6 +874,7 @@ class Route53Provider(_AuthMixin, BaseProvider):
             vpc_id,
             vpc_region,
             vpc_multi_action,
+            self.zone_ids,
         )
         super().__init__(id, *args, **kwargs)
 
@@ -872,13 +894,28 @@ class Route53Provider(_AuthMixin, BaseProvider):
         self._vpc_zone_ids = None  # Cache of zone IDs associated with vpc_id
         self._multi_vpc_zones = None  # Cache: {zone_id: [vpc_ids]}
         self._cidr_collections = {}  # Cache: collection_id -> {loc: [cidrs]}
+        # Names seen more than once while listing zones, not raised until
+        # (if ever) that specific name is actually requested. Cache:
+        # {zone_name: {zone_id, ...}}
+        self._r53_ambiguous = {}
+
+    def _multiple_zones_exception(self, name, ids):
+        ids = ', '.join(sorted(ids))
+        return Route53ProviderException(
+            f'Multiple zones named "{name}" were found ({ids}), use the '
+            "provider's zone_ids option to specify which one should be used."
+        )
 
     def _get_zone_id_by_name(self, name):
+        # A pin always wins, and lets us skip the API call entirely.
+        if name in self.zone_ids:
+            return self.zone_ids[name]
+
         # attempt to get zone by name
         resp = self._conn.list_hosted_zones_by_name(
             DNSName=name, MaxItems="100"
         )
-        id = None
+        ids = []
         if len(resp['HostedZones']) != 0:
             for z in resp['HostedZones']:
                 private_zone = z.get('Config', {}).get('PrivateZone', False)
@@ -893,13 +930,11 @@ class Route53Provider(_AuthMixin, BaseProvider):
 
                 # if there is a response that starts with the name
                 if _octal_replace(z['Name']).startswith(name):
-                    if id is not None:
-                        raise Route53ProviderException(
-                            f'Multiple zones named "{z["Name"]}" were found.'
-                        )
-                    id = z['Id']
-                    self.log.debug('get_zones_by_name:   id=%s', id)
-        return id
+                    ids.append(z['Id'])
+                    self.log.debug('get_zones_by_name:   id=%s', z['Id'])
+        if len(ids) > 1:
+            raise self._multiple_zones_exception(name, ids)
+        return ids[0] if ids else None
 
     def _get_zones_by_vpc(self):
         '''
@@ -926,10 +961,16 @@ class Route53Provider(_AuthMixin, BaseProvider):
 
                 zone_id = self._normalize_zone_id(zone_id)
 
+                if zone_name in self.zone_ids:
+                    zones[zone_name] = self.zone_ids[zone_name]
+                    continue
+
                 if zone_name in zones:
-                    raise Route53ProviderException(
-                        f'Multiple zones named "{zone_name}" were found.'
-                    )
+                    # Don't raise yet, see update_r53_zones/_r53_ambiguous.
+                    self._r53_ambiguous.setdefault(
+                        zone_name, {zones[zone_name]}
+                    ).add(zone_id)
+                    continue
                 zones[zone_name] = zone_id
 
             next_token = resp.get('NextToken')
@@ -983,6 +1024,9 @@ class Route53Provider(_AuthMixin, BaseProvider):
     def update_r53_zones(self, name):
         if self._r53_zones is None:
             if self.get_zones_by_name:
+                # Only ever looks at the single requested name, so it
+                # raises directly (see _get_zone_id_by_name) rather than
+                # going through self._r53_ambiguous below.
                 id = self._get_zone_id_by_name(name)
                 zones = {}
                 zones[name] = id
@@ -1011,10 +1055,17 @@ class Route53Provider(_AuthMixin, BaseProvider):
                         ):
                             continue
                         zname = _octal_replace(z['Name'])
+                        if zname in self.zone_ids:
+                            zones[zname] = self.zone_ids[zname]
+                            continue
                         if zname in zones:
-                            raise Route53ProviderException(
-                                f'Multiple zones named "{zname}" were found.'
-                            )
+                            # Don't raise yet, an unrelated duplicate
+                            # shouldn't block every other zone. Only raised
+                            # if/when zname itself is requested, below.
+                            self._r53_ambiguous.setdefault(
+                                zname, {zones[zname]}
+                            ).add(z['Id'])
+                            continue
                         zones[zname] = z['Id']
                     more = resp['IsTruncated']
                     start['Marker'] = resp.get('NextMarker', None)
@@ -1023,6 +1074,10 @@ class Route53Provider(_AuthMixin, BaseProvider):
             if name not in self._r53_zones and self.get_zones_by_name:
                 id = self._get_zone_id_by_name(name)
                 self._r53_zones[name] = id
+
+        ids = self._r53_ambiguous.get(name)
+        if ids:
+            raise self._multiple_zones_exception(name, ids)
 
     def _get_zone_id(self, name, create=False):
         self.log.debug('_get_zone_id: name=%s', name)
@@ -1494,9 +1549,21 @@ class Route53Provider(_AuthMixin, BaseProvider):
         # When vpc_id is specified, use list_hosted_zones_by_vpc
         if self.vpc_id is not None:
             zones = self._get_zones_by_vpc()
+            # list_zones enumerates the whole account/VPC, so unlike
+            # update_r53_zones there's no "unrelated" zone to protect;
+            # raise immediately for any unpinned duplicate it finds.
+            ambiguous = set(zones) & set(self._r53_ambiguous)
+            if ambiguous:
+                name = sorted(ambiguous)[0]
+                raise self._multiple_zones_exception(
+                    name, self._r53_ambiguous[name]
+                )
             return sorted(zones.keys())
 
         hosted_zones = []
+        # octal-normalized name -> ids seen for it, to dedupe pins and
+        # detect unpinned duplicates.
+        seen = {}
         params = {}
         if self.delegation_set_id:
             params['DelegationSetId'] = self.delegation_set_id
@@ -1507,10 +1574,15 @@ class Route53Provider(_AuthMixin, BaseProvider):
                 private_zone = h.get('Config', {}).get('PrivateZone', False)
                 if self.private is not None and self.private != private_zone:
                     continue
-                if h['Name'] in hosted_zones:
-                    raise Route53ProviderException(
-                        f'Multiple zones named "{h["Name"]}" were found.'
+                name = _octal_replace(h['Name'])
+                if name in seen:
+                    if name in self.zone_ids:
+                        # pinned, already included once
+                        continue
+                    raise self._multiple_zones_exception(
+                        name, seen[name] | {h['Id']}
                     )
+                seen[name] = {h['Id']}
                 hosted_zones.append(h['Name'])
             params['Marker'] = resp.get('NextMarker', None)
             more = resp['IsTruncated']
