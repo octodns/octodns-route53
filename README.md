@@ -91,8 +91,10 @@ domain, build it out, validate it against its own nameservers, switch delegation
 delete the old one. For as long as both zones exist `Route53Provider` can't tell them apart by
 name alone and raises `Multiple zones named "..." were found`. Set `zone_ids` to say which
 hosted zone id you mean for that name; both zones need pinning once the duplicate exists,
-since a provider left pointed at the old zone by name hits the same ambiguity. Pinned names are
-never created by octoDNS — the zone must already exist in Route53.
+since a provider left pointed at the old zone by name hits the same ambiguity. A pin is
+authoritative: `zone_ids` names are never created by octoDNS — the zone must already exist in
+Route53 — and a pinned id that doesn't resolve to a real zone fails against the Route53 API
+rather than silently falling back to creating one.
 
 If both zones are being driven from the same YAML source, watch out for root NS records:
 `Route53Provider` converts an apex `NS` create into an update (since a zone's own NS rrset is

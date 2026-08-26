@@ -1046,6 +1046,13 @@ class Route53Provider(_AuthMixin, BaseProvider):
                 while more:
                     resp = self._conn.list_hosted_zones(**start)
                     for z in resp['HostedZones']:
+                        zname = _octal_replace(z['Name'])
+                        if zname in self.zone_ids:
+                            # A pin is authoritative, apply it even if the
+                            # private filter below would otherwise drop
+                            # this entry.
+                            zones[zname] = self.zone_ids[zname]
+                            continue
                         private_zone = z.get('Config', {}).get(
                             'PrivateZone', False
                         )
@@ -1053,10 +1060,6 @@ class Route53Provider(_AuthMixin, BaseProvider):
                             self.private is not None
                             and self.private != private_zone
                         ):
-                            continue
-                        zname = _octal_replace(z['Name'])
-                        if zname in self.zone_ids:
-                            zones[zname] = self.zone_ids[zname]
                             continue
                         if zname in zones:
                             # Don't raise yet, an unrelated duplicate
@@ -1074,6 +1077,15 @@ class Route53Provider(_AuthMixin, BaseProvider):
             if name not in self._r53_zones and self.get_zones_by_name:
                 id = self._get_zone_id_by_name(name)
                 self._r53_zones[name] = id
+
+        # A pin is authoritative: the zone is expected to already exist, so
+        # record it even if the listing above didn't include it -- a stale
+        # or mistyped id, a deleted zone, or one the private/vpc filters
+        # excluded. Without this _get_zone_id finds no id for `name` and
+        # falls through to create_hosted_zone, creating an unintended zone.
+        if name in self.zone_ids:
+            self._r53_zones[name] = self.zone_ids[name]
+            return
 
         ids = self._r53_ambiguous.get(name)
         if ids:

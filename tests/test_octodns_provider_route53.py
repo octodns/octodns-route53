@@ -1454,6 +1454,95 @@ class TestRoute53Provider(TestCase):
         provider.update_r53_zones("unit.tests.")
         self.assertEqual(provider._r53_zones['unit.tests.'], '/hostedzone/z41')
 
+    def test_zone_ids_pin_missing_from_listing_not_created(self):
+        # A pin is authoritative even when nothing in the account listing
+        # matches the name -- a stale/mistyped id, a deleted zone, or an
+        # empty account. It must not fall through to create_hosted_zone.
+        provider, stubber = self._get_stubbed_zone_ids_provider(
+            zone_ids={'missing.tests.': 'z41'}
+        )
+
+        stubber.add_response(
+            'list_hosted_zones',
+            {
+                'HostedZones': [],
+                'Marker': '',
+                'IsTruncated': False,
+                'MaxItems': '100',
+            },
+        )
+
+        self.assertEqual(
+            '/hostedzone/z41', provider._get_zone_id('missing.tests.', True)
+        )
+        stubber.assert_no_pending_responses()
+
+    def test_zone_ids_pin_filtered_out_not_created(self):
+        # A pin is authoritative even when the matching listing entry would
+        # otherwise be dropped by the private filter.
+        provider, stubber = self._get_stubbed_zone_ids_provider(
+            private=False, zone_ids={'unit.tests.': 'z41'}
+        )
+
+        stubber.add_response(
+            'list_hosted_zones',
+            {
+                'HostedZones': [
+                    {
+                        'Id': 'z41',
+                        'Name': 'unit.tests.',
+                        'CallerReference': 'abc',
+                        'Config': {'PrivateZone': True},
+                    }
+                ],
+                'Marker': '',
+                'IsTruncated': False,
+                'MaxItems': '100',
+            },
+        )
+
+        self.assertEqual(
+            '/hostedzone/z41', provider._get_zone_id('unit.tests.', True)
+        )
+        stubber.assert_no_pending_responses()
+
+    def test_zone_ids_pin_missing_from_vpc_listing_not_created(self):
+        provider = Route53Provider(
+            'test',
+            'abc',
+            '123',
+            strict_supports=False,
+            vpc_id='vpc-12345678',
+            vpc_region='us-east-1',
+            zone_ids={'missing.tests.': 'z41'},
+        )
+        stubber = Stubber(provider._conn)
+        stubber.activate()
+
+        stubber.add_response(
+            'list_hosted_zones_by_vpc',
+            {'HostedZoneSummaries': [], 'MaxItems': '100'},
+            {'VPCId': 'vpc-12345678', 'VPCRegion': 'us-east-1'},
+        )
+
+        self.assertEqual(
+            '/hostedzone/z41', provider._get_zone_id('missing.tests.', True)
+        )
+        stubber.assert_no_pending_responses()
+
+    def test_zone_ids_pin_with_cached_zones_not_created(self):
+        # The pin still applies when _r53_zones was already loaded (the
+        # `else` branch of update_r53_zones) and doesn't contain it.
+        provider, stubber = self._get_stubbed_zone_ids_provider(
+            zone_ids={'missing.tests.': 'z41'}
+        )
+        provider._r53_zones = {'other.tests.': 'z1'}
+
+        self.assertEqual(
+            '/hostedzone/z41', provider._get_zone_id('missing.tests.', True)
+        )
+        stubber.assert_no_pending_responses()
+
     def test_get_r53_private_zones_with_get_zones_by_name(self):
         provider, stubber = (
             self._get_stubbed_get_zones_by_name_enabled_private_provider()
