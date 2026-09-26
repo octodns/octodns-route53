@@ -2051,7 +2051,7 @@ class Route53Provider(_AuthMixin, BaseProvider):
             ).get('DNSName', '').startswith('_octodns-'):
                 # Found an existing CIDR rule, check if it belongs to this
                 # record by seeing if the alias target ends with our fqdn
-                target = rrset['AliasTarget']['DNSName']
+                target = _octal_replace(rrset['AliasTarget']['DNSName'])
                 if not target.endswith(f'.{fqdn}'):
                     continue
                 if _type != rrset['Type']:
@@ -2084,7 +2084,9 @@ class Route53Provider(_AuthMixin, BaseProvider):
 
         # loop through all the r53 rrsets
         for rrset in self._load_records(zone_id):
-            name = rrset['Name']
+            # Unescape so that names with special characters, e.g. wildcards
+            # which Route53 returns as `\052`, can match the record's fqdn
+            name = _octal_replace(rrset['Name'])
             # Break off the first piece of the name, it'll let us figure out if
             # this is an rrset we're interested in.
             maybe_meta, rest = name.split('.', 1)

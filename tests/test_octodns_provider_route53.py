@@ -5394,6 +5394,120 @@ class TestRoute53Provider(TestCase):
         result = provider._extra_changes_dynamic_needs_update('z44', record)
         self.assertTrue(result)
 
+    def test_extra_changes_cidr_drift_wildcard(self):
+        # Route53 returns the `*` in wildcard names octal escaped as `\052`,
+        # drift on those records must still be found
+        provider, stubber = self._get_stubbed_provider()
+
+        provider._health_checks = {}
+        provider._cidr_collections = {}
+
+        zone = Zone('unit.tests.', [])
+        record = Record.new(
+            zone,
+            '*',
+            {
+                'dynamic': {
+                    'pools': {
+                        'internal': {
+                            'values': [
+                                {
+                                    'weight': 1,
+                                    'value': '10.0.0.1',
+                                    'status': 'up',
+                                }
+                            ]
+                        },
+                        'external': {
+                            'values': [
+                                {
+                                    'weight': 1,
+                                    'value': '2.2.2.2',
+                                    'status': 'up',
+                                }
+                            ]
+                        },
+                    },
+                    'rules': [
+                        {'pool': 'internal', 'subnets': ['10.0.0.0/8']},
+                        {'pool': 'external'},
+                    ],
+                },
+                'ttl': 60,
+                'type': 'A',
+                'values': ['1.1.2.1', '1.1.2.2'],
+            },
+        )
+
+        provider._r53_rrsets = {
+            'z44': [
+                {
+                    'AliasTarget': {
+                        'DNSName': '_octodns-internal-pool.\\052.unit.tests.',
+                        'EvaluateTargetHealth': True,
+                        'HostedZoneId': 'Z2',
+                    },
+                    'CidrRoutingConfig': {
+                        'CollectionId': 'col-1234',
+                        # doesn't match the desired subnets, i.e. drift
+                        'LocationName': 'deadbeefdeadbeef',
+                    },
+                    'Name': '\\052.unit.tests.',
+                    'SetIdentifier': '0-internal-subnet',
+                    'Type': 'A',
+                }
+            ]
+        }
+
+        self.assertTrue(
+            provider._extra_changes_dynamic_needs_update('z44', record)
+        )
+
+    def test_extra_changes_health_check_wildcard(self):
+        # Route53 returns the `*` in wildcard names octal escaped as `\052`,
+        # their value rrsets must still be checked for health check changes
+        provider, stubber = self._get_stubbed_provider()
+
+        # the rrset's health check doesn't exist so it needs an update
+        provider._health_checks = {}
+
+        zone = Zone('unit.tests.', [])
+        record = Record.new(
+            zone,
+            '*',
+            {
+                'dynamic': {
+                    'pools': {
+                        'primary': {
+                            'values': [{'value': '1.1.1.1', 'status': 'obey'}]
+                        }
+                    },
+                    'rules': [{'pool': 'primary'}],
+                },
+                'ttl': 60,
+                'type': 'A',
+                'values': ['1.1.1.1'],
+            },
+        )
+
+        provider._r53_rrsets = {
+            'z44': [
+                {
+                    'HealthCheckId': 'gone',
+                    'Name': '_octodns-primary-value.\\052.unit.tests.',
+                    'ResourceRecords': [{'Value': '1.1.1.1'}],
+                    'SetIdentifier': 'primary-000',
+                    'TTL': 60,
+                    'Type': 'A',
+                    'Weight': 1,
+                }
+            ]
+        }
+
+        self.assertTrue(
+            provider._extra_changes_dynamic_needs_update('z44', record)
+        )
+
     def test_extra_changes_cidr_no_drift(self):
         provider, stubber = self._get_stubbed_provider()
 
