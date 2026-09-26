@@ -1,3 +1,8 @@
+## 1.3.1 - 2026-09-25
+
+Patch:
+* Fix wildcard dynamic records: deleting them no longer fails with InvalidChangeBatch, and health check and CIDR drift is now detected for them - [#149](https://github.com/octodns/octodns-route53/pull/149)
+
 ## 1.3.0 - 2026-07-22
 
 Minor:
