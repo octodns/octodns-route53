@@ -3535,6 +3535,75 @@ class TestRoute53Provider(TestCase):
         )
         stubber.assert_no_pending_responses()
 
+    def test_delete_wildcard_dynamic_uses_live_health_check_ids(self):
+        # Deleting a wildcard dynamic record must send the live value rrsets,
+        # health check ids included, back to Route53. The wildcard's name is
+        # returned octal escaped (`\052`) so it used to never match, we'd fall
+        # back to building the rrsets ourselves and those wouldn't have a
+        # health check id when it couldn't be found, e.g. the record from
+        # populate doesn't have the non-default healthcheck config it was
+        # created with or the health check was already gone, and Route53 would
+        # reject the delete as not matching the current values.
+        provider, stubber = self._get_stubbed_provider()
+        # no health checks to be found
+        provider._health_checks = {}
+
+        # what populate gives us, note no octodns.healthcheck config
+        record = Record.new(
+            self.expected,
+            '*.foo',
+            {
+                'dynamic': {
+                    'pools': {
+                        'primary': {
+                            'values': [
+                                {'value': '1.1.1.1', 'status': 'obey'},
+                                {'value': '8.8.8.8', 'status': 'obey'},
+                            ]
+                        }
+                    },
+                    'rules': [{'pool': 'primary'}],
+                },
+                'ttl': 61,
+                'type': 'A',
+                'values': ['1.1.1.1', '8.8.8.8'],
+            },
+        )
+
+        live = [
+            {
+                'HealthCheckId': f'hc-{i}',
+                'Name': '_octodns-primary-value.\\052.foo.unit.tests.',
+                'ResourceRecords': [{'Value': value}],
+                'SetIdentifier': f'primary-{i:03d}',
+                'TTL': 61,
+                'Type': 'A',
+                'Weight': 1,
+            }
+            for i, value in enumerate(('1.1.1.1', '8.8.8.8'))
+        ]
+
+        mods = provider._mod_Delete(Delete(record), 'z43', live)
+
+        value_mods = [
+            m
+            for m in mods
+            if m['ResourceRecordSet']
+            .get('SetIdentifier', '')
+            .startswith('primary-0')
+        ]
+        self.assertEqual(
+            [
+                {'Action': 'DELETE', 'ResourceRecordSet': live[0]},
+                {'Action': 'DELETE', 'ResourceRecordSet': live[1]},
+            ],
+            sorted(
+                value_mods,
+                key=lambda m: m['ResourceRecordSet']['SetIdentifier'],
+            ),
+        )
+        stubber.assert_no_pending_responses()
+
     def test_health_check_gc_long_fqdn(self):
         # Regression test for the hashing-related gc gap found while fixing
         # #140: for long fqdns _healthcheck_ref_prefix hashes the fqdn
@@ -5949,6 +6018,31 @@ class TestRoute53Records(TestCase):
         del rrset['HealthCheckId']
         mod = geo.mod('DELETE', [])
         self.assertEqual(rrset, mod['ResourceRecordSet'])
+
+    def test_dynamic_value_delete_wildcard(self):
+        # Route53 returns the `*` in wildcard names octal escaped as `\052`
+        wildcard = Record.new(
+            self.existing, '*', {'ttl': 99, 'type': 'A', 'values': ['2.2.2.2']}
+        )
+        value = _Route53DynamicValue(
+            DummyProvider(), wildcard, 'iad', '2.2.2.2', 1, 'obey', 0, False
+        )
+        self.assertEqual('_octodns-iad-value.*.unit.tests.', value.fqdn)
+
+        rrset = {
+            'HealthCheckId': 'x12346z',
+            'Name': '_octodns-iad-value.\\052.unit.tests.',
+            'ResourceRecords': [{'Value': '2.2.2.2'}],
+            'SetIdentifier': 'iad-000',
+            'TTL': 99,
+            'Type': 'A',
+            'Weight': 1,
+        }
+
+        # The live rrset is found, DummyProvider doesn't have a health check
+        # to offer so the only way to get the id is via the rrset
+        mod = value.mod('DELETE', [rrset])
+        self.assertEqual({'Action': 'DELETE', 'ResourceRecordSet': rrset}, mod)
 
     def test_new_dynamic(self):
         provider = Route53Provider('test', 'abc', '123')

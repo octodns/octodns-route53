@@ -624,8 +624,14 @@ class _Route53DynamicValue(_Route53Record):
             # ensures we have the right health check id when there's multiple
             # potential matches)
             for existing in existing_rrsets:
-                if self.fqdn == existing.get(
-                    'Name'
+                # Route53 returns names with special characters octal escaped,
+                # e.g. `*` as `\052`, so they need to be unescaped to compare.
+                # Without this wildcards never match and we'd fall back to
+                # building the rrset, which can't reliably find the health
+                # check id when the record didn't come with its healthcheck
+                # config or the health check is already gone.
+                if self.fqdn == _octal_replace(
+                    existing.get('Name', '')
                 ) and self.identifer == existing.get('SetIdentifier', None):
                     return {'Action': action, 'ResourceRecordSet': existing}
 
