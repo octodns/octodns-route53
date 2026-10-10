@@ -806,6 +806,17 @@ class TestRoute53Provider(TestCase):
 
         return (provider, stubber)
 
+    def _get_stubbed_zone_ids_provider(self, **kwargs):
+        provider = Route53Provider(
+            'test', 'abc', '123', strict_supports=False, **kwargs
+        )
+
+        # Use the stubber
+        stubber = Stubber(provider._conn)
+        stubber.activate()
+
+        return (provider, stubber)
+
     def test_update_r53_zones(self):
         provider, stubber = self._get_stubbed_provider()
 
@@ -905,6 +916,52 @@ class TestRoute53Provider(TestCase):
         self.assertIn(
             'delegation_set_id cannot be used with private zones',
             str(ctx.exception),
+        )
+
+    def test_zone_ids_not_a_dict_raises(self):
+        with self.assertRaises(Route53ProviderException) as ctx:
+            Route53Provider(
+                'test',
+                'abc',
+                '123',
+                strict_supports=False,
+                zone_ids=['unit.tests.', 'z41'],
+            )
+        self.assertIn('zone_ids must be a dict', str(ctx.exception))
+
+    def test_zone_ids_non_string_entry_raises(self):
+        with self.assertRaises(Route53ProviderException) as ctx:
+            Route53Provider(
+                'test',
+                'abc',
+                '123',
+                strict_supports=False,
+                zone_ids={'unit.tests.': 42},
+            )
+        self.assertIn(
+            'zone_ids keys and values must be strings', str(ctx.exception)
+        )
+
+    def test_zone_ids_normalized(self):
+        # names get idna-encoded and a trailing dot, ids get the
+        # /hostedzone/ prefix, matching what the AWS APIs return.
+        provider = Route53Provider(
+            'test',
+            'abc',
+            '123',
+            strict_supports=False,
+            zone_ids={
+                'Unit.Tests': 'z41',
+                'unit.tests.': '/hostedzone/z42',
+                'xn--e1aybc.tests.': 'z43',
+            },
+        )
+        self.assertEqual(
+            {
+                'unit.tests.': '/hostedzone/z42',
+                'xn--e1aybc.tests.': '/hostedzone/z43',
+            },
+            provider.zone_ids,
         )
 
     def test_vpc_id_with_private_true(self):
@@ -1011,8 +1068,51 @@ class TestRoute53Provider(TestCase):
             {'VPCId': 'vpc-12345678', 'VPCRegion': 'us-east-1'},
         )
 
-        with self.assertRaises(Route53ProviderException):
+        with self.assertRaises(Route53ProviderException) as ctx:
             provider.update_r53_zones("unit.tests.")
+        self.assertIn(
+            'Multiple zones named "unit.tests." were found', str(ctx.exception)
+        )
+        self.assertIn('zone_ids', str(ctx.exception))
+
+    def test_update_r53_zones_vpc_zone_ids_pin(self):
+        # A zone_ids pin resolves an otherwise ambiguous VPC zone name.
+        provider = Route53Provider(
+            'test',
+            'abc',
+            '123',
+            strict_supports=False,
+            vpc_id='vpc-12345678',
+            vpc_region='us-east-1',
+            zone_ids={'unit.tests.': 'z43'},
+        )
+        stubber = Stubber(provider._conn)
+        stubber.activate()
+
+        list_hosted_zones_by_vpc_resp = {
+            'HostedZoneSummaries': [
+                {
+                    'HostedZoneId': 'z42',
+                    'Name': 'unit.tests.',
+                    'Owner': {'OwningAccount': '123456789012'},
+                },
+                {
+                    'HostedZoneId': 'z43',
+                    'Name': 'unit.tests.',
+                    'Owner': {'OwningAccount': '123456789012'},
+                },
+            ],
+            'MaxItems': '100',
+        }
+
+        stubber.add_response(
+            'list_hosted_zones_by_vpc',
+            list_hosted_zones_by_vpc_resp,
+            {'VPCId': 'vpc-12345678', 'VPCRegion': 'us-east-1'},
+        )
+
+        provider.update_r53_zones("unit.tests.")
+        self.assertEqual(provider._r53_zones['unit.tests.'], '/hostedzone/z43')
 
     def test_vpc_id_missing_region_raises(self):
         # vpc_region is required when vpc_id is specified
@@ -1264,8 +1364,184 @@ class TestRoute53Provider(TestCase):
 
         stubber.add_response('list_hosted_zones', list_hosted_zones)
 
-        with self.assertRaises(Route53ProviderException):
+        with self.assertRaises(Route53ProviderException) as ctx:
             provider.update_r53_zones("unit.tests.")
+        self.assertIn(
+            'Multiple zones named "unit.tests." were found (z40, z41)',
+            str(ctx.exception),
+        )
+        self.assertIn('zone_ids', str(ctx.exception))
+
+    def test_update_r53_zones_multiple_lazy(self):
+        # A duplicate name elsewhere in the account doesn't block a zone
+        # that isn't ambiguous.
+        provider, stubber = self._get_stubbed_provider()
+
+        list_hosted_zones = {
+            'HostedZones': [
+                {
+                    'Id': 'z40',
+                    'Name': 'unit.tests.',
+                    'CallerReference': 'abc',
+                    'Config': {'Comment': 'string', 'PrivateZone': False},
+                    'ResourceRecordSetCount': 123,
+                },
+                {
+                    'Id': 'z41',
+                    'Name': 'unit.tests.',
+                    'CallerReference': 'abc',
+                    'Config': {'Comment': 'string', 'PrivateZone': True},
+                    'ResourceRecordSetCount': 123,
+                },
+                {
+                    'Id': 'z42',
+                    'Name': 'other.tests.',
+                    'CallerReference': 'abc',
+                    'Config': {'Comment': 'string', 'PrivateZone': False},
+                    'ResourceRecordSetCount': 123,
+                },
+            ],
+            'Marker': 'm',
+            'IsTruncated': False,
+            'MaxItems': '100',
+        }
+
+        stubber.add_response('list_hosted_zones', list_hosted_zones)
+
+        # unit.tests. is ambiguous, but asking for other.tests. is fine
+        provider.update_r53_zones("other.tests.")
+        self.assertEqual(provider._r53_zones['other.tests.'], 'z42')
+
+        # now ask for the ambiguous name, using the cached load
+        with self.assertRaises(Route53ProviderException) as ctx:
+            provider.update_r53_zones("unit.tests.")
+        self.assertIn(
+            'Multiple zones named "unit.tests." were found (z40, z41)',
+            str(ctx.exception),
+        )
+
+    def test_update_r53_zones_with_zone_ids_pin(self):
+        # A zone_ids pin resolves an otherwise ambiguous name with no
+        # exception raised.
+        provider, stubber = self._get_stubbed_zone_ids_provider(
+            zone_ids={'unit.tests.': 'z41'}
+        )
+
+        list_hosted_zones = {
+            'HostedZones': [
+                {
+                    'Id': 'z40',
+                    'Name': 'unit.tests.',
+                    'CallerReference': 'abc',
+                    'Config': {'Comment': 'string', 'PrivateZone': False},
+                    'ResourceRecordSetCount': 123,
+                },
+                {
+                    'Id': 'z41',
+                    'Name': 'unit.tests.',
+                    'CallerReference': 'abc',
+                    'Config': {'Comment': 'string', 'PrivateZone': True},
+                    'ResourceRecordSetCount': 123,
+                },
+            ],
+            'Marker': 'm',
+            'IsTruncated': False,
+            'MaxItems': '100',
+        }
+
+        stubber.add_response('list_hosted_zones', list_hosted_zones)
+
+        provider.update_r53_zones("unit.tests.")
+        self.assertEqual(provider._r53_zones['unit.tests.'], '/hostedzone/z41')
+
+    def test_zone_ids_pin_missing_from_listing_not_created(self):
+        # A pin is authoritative even when nothing in the account listing
+        # matches the name -- a stale/mistyped id, a deleted zone, or an
+        # empty account. It must not fall through to create_hosted_zone.
+        provider, stubber = self._get_stubbed_zone_ids_provider(
+            zone_ids={'missing.tests.': 'z41'}
+        )
+
+        stubber.add_response(
+            'list_hosted_zones',
+            {
+                'HostedZones': [],
+                'Marker': '',
+                'IsTruncated': False,
+                'MaxItems': '100',
+            },
+        )
+
+        self.assertEqual(
+            '/hostedzone/z41', provider._get_zone_id('missing.tests.', True)
+        )
+        stubber.assert_no_pending_responses()
+
+    def test_zone_ids_pin_filtered_out_not_created(self):
+        # A pin is authoritative even when the matching listing entry would
+        # otherwise be dropped by the private filter.
+        provider, stubber = self._get_stubbed_zone_ids_provider(
+            private=False, zone_ids={'unit.tests.': 'z41'}
+        )
+
+        stubber.add_response(
+            'list_hosted_zones',
+            {
+                'HostedZones': [
+                    {
+                        'Id': 'z41',
+                        'Name': 'unit.tests.',
+                        'CallerReference': 'abc',
+                        'Config': {'PrivateZone': True},
+                    }
+                ],
+                'Marker': '',
+                'IsTruncated': False,
+                'MaxItems': '100',
+            },
+        )
+
+        self.assertEqual(
+            '/hostedzone/z41', provider._get_zone_id('unit.tests.', True)
+        )
+        stubber.assert_no_pending_responses()
+
+    def test_zone_ids_pin_missing_from_vpc_listing_not_created(self):
+        provider = Route53Provider(
+            'test',
+            'abc',
+            '123',
+            strict_supports=False,
+            vpc_id='vpc-12345678',
+            vpc_region='us-east-1',
+            zone_ids={'missing.tests.': 'z41'},
+        )
+        stubber = Stubber(provider._conn)
+        stubber.activate()
+
+        stubber.add_response(
+            'list_hosted_zones_by_vpc',
+            {'HostedZoneSummaries': [], 'MaxItems': '100'},
+            {'VPCId': 'vpc-12345678', 'VPCRegion': 'us-east-1'},
+        )
+
+        self.assertEqual(
+            '/hostedzone/z41', provider._get_zone_id('missing.tests.', True)
+        )
+        stubber.assert_no_pending_responses()
+
+    def test_zone_ids_pin_with_cached_zones_not_created(self):
+        # The pin still applies when _r53_zones was already loaded (the
+        # `else` branch of update_r53_zones) and doesn't contain it.
+        provider, stubber = self._get_stubbed_zone_ids_provider(
+            zone_ids={'missing.tests.': 'z41'}
+        )
+        provider._r53_zones = {'other.tests.': 'z1'}
+
+        self.assertEqual(
+            '/hostedzone/z41', provider._get_zone_id('missing.tests.', True)
+        )
+        stubber.assert_no_pending_responses()
 
     def test_get_r53_private_zones_with_get_zones_by_name(self):
         provider, stubber = (
@@ -1764,8 +2040,61 @@ class TestRoute53Provider(TestCase):
         stubber.add_response(
             'list_hosted_zones', list_hosted_zones_mutliple_resp, {}
         )
-        with self.assertRaises(Route53ProviderException):
+        with self.assertRaises(Route53ProviderException) as ctx:
             provider.list_zones()
+        self.assertIn(
+            'Multiple zones named "unit.tests." were found (z42, z43)',
+            str(ctx.exception),
+        )
+        self.assertIn('zone_ids', str(ctx.exception))
+
+    def test_list_zones_with_zone_ids_pin(self):
+        # A pinned duplicate name is deduped, not raised, and appears once.
+        provider, stubber = self._get_stubbed_zone_ids_provider(
+            zone_ids={'unit.tests.': 'z43'}
+        )
+
+        list_hosted_zones_resp = {
+            'HostedZones': [
+                {'Name': 'unit.tests.', 'Id': 'z42', 'CallerReference': 'abc'},
+                {'Name': 'unit.tests.', 'Id': 'z43', 'CallerReference': 'abd'},
+                {'Name': 'alpha.com.', 'Id': 'z44', 'CallerReference': 'abe'},
+            ],
+            'Marker': '',
+            'IsTruncated': False,
+            'MaxItems': '100',
+        }
+        stubber.add_response('list_hosted_zones', list_hosted_zones_resp, {})
+        self.assertEqual(['alpha.com.', 'unit.tests.'], provider.list_zones())
+
+    def test_list_zones_vpc_multiple_raises(self):
+        provider, stubber = self._get_stubbed_vpc_provider()
+
+        list_hosted_zones_by_vpc_resp = {
+            'HostedZoneSummaries': [
+                {
+                    'HostedZoneId': 'z42',
+                    'Name': 'unit.tests.',
+                    'Owner': {'OwningAccount': '123456789012'},
+                },
+                {
+                    'HostedZoneId': 'z43',
+                    'Name': 'unit.tests.',
+                    'Owner': {'OwningAccount': '123456789012'},
+                },
+            ],
+            'MaxItems': '100',
+        }
+        stubber.add_response(
+            'list_hosted_zones_by_vpc',
+            list_hosted_zones_by_vpc_resp,
+            {'VPCId': 'vpc-12345678', 'VPCRegion': 'us-east-1'},
+        )
+        with self.assertRaises(Route53ProviderException) as ctx:
+            provider.list_zones()
+        self.assertIn(
+            'Multiple zones named "unit.tests." were found', str(ctx.exception)
+        )
 
     def test_list_private_zones(self):
         provider, stubber = self._get_stubbed_private_provider()
@@ -3937,8 +4266,24 @@ class TestRoute53Provider(TestCase):
             {'HostedZoneId': 'z42'},
         )
 
-        with self.assertRaises(Route53ProviderException):
+        with self.assertRaises(Route53ProviderException) as ctx:
             provider.plan(self.expected)
+        self.assertIn(
+            'Multiple zones named "unit.tests." were found (z42, z43)',
+            str(ctx.exception),
+        )
+        self.assertIn('zone_ids', str(ctx.exception))
+
+    def test_get_zone_id_by_name_zone_ids_pin_skips_api_call(self):
+        # A pin resolves without ever calling list_hosted_zones_by_name.
+        provider, stubber = self._get_stubbed_zone_ids_provider(
+            get_zones_by_name=True, zone_ids={'unit.tests.': 'z41'}
+        )
+
+        self.assertEqual(
+            '/hostedzone/z41', provider._get_zone_id_by_name('unit.tests.')
+        )
+        stubber.assert_no_pending_responses()
 
     def test_plan_apply_with_get_zones_by_name_zone_not_exists(self):
         provider, stubber = (
