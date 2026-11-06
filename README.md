@@ -69,11 +69,40 @@ providers:
     #   - "ignore": Silently proceed
     # Only applies when vpc_id is specified.
     #vpc_multi_action: error
+    # Optionally pin specific zone names to specific hosted zone ids. Takes
+    # precedence over the normal name-based lookup, so it also resolves the
+    # "Multiple zones named ... were found" error when the account legitimately
+    # has more than one hosted zone with the same name, e.g. two public zones
+    # for example.com. while staging an NS cutover. See "Duplicate zone names"
+    # below.
+    #zone_ids:
+    #  example.com.: Z0123456789ABCDEFGHIJ
 ```
 
 Alternatively, you may leave out access_key_id, secret_access_key and session_token.  This will result in boto3 deciding authentication dynamically.
 
 In general the account used will need full permissions on Route53.
+
+##### Duplicate zone names
+
+Route53 allows more than one hosted zone with the same name in an account, most commonly while
+staging a replacement zone ahead of an NS cutover migration: create a second zone for the same
+domain, build it out, validate it against its own nameservers, switch delegation over, then
+delete the old one. For as long as both zones exist `Route53Provider` can't tell them apart by
+name alone and raises `Multiple zones named "..." were found`. Set `zone_ids` to say which
+hosted zone id you mean for that name; both zones need pinning once the duplicate exists,
+since a provider left pointed at the old zone by name hits the same ambiguity. A pin is
+authoritative: `zone_ids` names are never created by octoDNS — the zone must already exist in
+Route53 — and a pinned id that doesn't resolve to a real zone fails against the Route53 API
+rather than silently falling back to creating one.
+
+If both zones are being driven from the same YAML source, watch out for root NS records:
+`Route53Provider` converts an apex `NS` create into an update (since a zone's own NS rrset is
+created for you), so applying one source to both zones will overwrite each zone's own
+delegation set with the other's. Keep the shared records in a common source and put anything
+zone-specific — including the root `NS` record, or its omission — in a small per-zone overlay
+that only that provider instance loads, the same way you'd manage any other zone-specific
+config.
 
 #### Ec2Souce
 
